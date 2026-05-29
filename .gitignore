@@ -1,0 +1,26 @@
+# Built artifacts
+*.iml
+.gradle
+/local.properties
+/build
+/app/build
+/captures
+
+# Android Studio
+/.idea/
+.DS_Store
+.externalNativeBuild
+.cxx
+
+# Keys / secrets
+*.jks
+*.keystore
+keystore.properties
+
+# Compressed files
+*.rar
+*.zip
+*.tar.gz
+
+# Claude Code
+.claude/
