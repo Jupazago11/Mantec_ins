@@ -627,3 +627,20 @@ SyncRepository.syncPendingReports()
 **Mantec Inspector** es una aplicación Android Kotlin para inspectores de campo en entornos industriales. Permite registrar inspecciones de equipos (con diagnóstico, condición, fotos y videos) y mediciones de espesor de correas, todo funcionando offline. Los datos se sincronizan al servidor central (`mantecsas.com`) cuando hay conectividad disponible, de forma automática o manual.
 
 Arquitectónicamente usa MVVM + Clean Architecture con Room, Retrofit y WorkManager. El mayor riesgo técnico actual es la migración destructiva de base de datos y la ausencia de Hilt (dependencias manuales en una MainActivity de ~1500 líneas). El proyecto está funcional y bien estructurado en cuanto a separación de capas, pero necesita refactoring de la actividad principal, implementación de migraciones Room explícitas, cifrado del token y manejo de errores de autenticación en runtime antes de considerarse production-ready.
+
+---
+
+## 16. Historial de versiones
+
+### v1.6.1 — Corrección crash al tomar foto/video
+
+**Archivo modificado:** `MainActivity.kt`
+
+**Problema:** La app se cerraba con "force closed due to an internal error" al intentar tomar una foto o grabar un video.
+
+**Causa raíz:** El `AndroidManifest.xml` declara `android.permission.CAMERA` y el `targetSdk` es 35. En Android 11+ (API 30+), si una app declara ese permiso en el manifest, el sistema exige que esté concedido en tiempo de ejecución antes de lanzar `ActivityResultContracts.TakePicture()` o `CaptureVideo()`. No existía ninguna solicitud de permiso en runtime, lo que provocaba una `SecurityException` al intentar abrir la cámara.
+
+**Cambios:**
+- Se agregaron dos variables de estado (`pendingTakePhoto`, `pendingRecordVideo`) para rastrear qué acción quedó pendiente mientras se espera la respuesta del permiso.
+- Se agregó `requestCameraPermissionLauncher` (después de `createVideoUri()`) que solicita el permiso CAMERA y, si se concede, ejecuta la acción pendiente.
+- Se actualizaron `onTakePhotoClick` y `onRecordVideoClick` para verificar el permiso antes de lanzar la cámara; si no está concedido, solicitan el permiso en lugar de crashear.

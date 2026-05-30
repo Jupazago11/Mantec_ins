@@ -456,6 +456,8 @@ class MainActivity : ComponentActivity() {
                 var homeSyncWarning by remember { mutableStateOf<String?>(null) }
                 var isManualSyncRunning by remember { mutableStateOf(false) }
                 var connectionLabel by remember { mutableStateOf(NetworkUtils.connectionLabel(this)) }
+                var pendingTakePhoto by remember { mutableStateOf(false) }
+                var pendingRecordVideo by remember { mutableStateOf(false) }
 
 
 
@@ -515,6 +517,31 @@ class MainActivity : ComponentActivity() {
                         MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
                         contentValues
                     )
+                }
+
+                val requestCameraPermissionLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission()
+                ) { isGranted ->
+                    if (isGranted) {
+                        if (pendingTakePhoto) {
+                            pendingTakePhoto = false
+                            val uri = createImageUri()
+                            if (uri != null) {
+                                photoUri = uri
+                                takePictureLauncher.launch(uri)
+                            }
+                        } else if (pendingRecordVideo) {
+                            pendingRecordVideo = false
+                            val uri = createVideoUri()
+                            if (uri != null) {
+                                videoUri = uri
+                                captureVideoLauncher.launch(uri)
+                            }
+                        }
+                    } else {
+                        pendingTakePhoto = false
+                        pendingRecordVideo = false
+                    }
                 }
 
                 LaunchedEffect(currentScreen, elements) {
@@ -1024,17 +1051,27 @@ class MainActivity : ComponentActivity() {
                                     inspectionVM.setIsBeltChange(value)
                                 },
                                 onTakePhotoClick = {
-                                    val uri = createImageUri()
-                                    if (uri != null) {
-                                        photoUri = uri
-                                        takePictureLauncher.launch(uri)
+                                    if (checkSelfPermission(android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                        val uri = createImageUri()
+                                        if (uri != null) {
+                                            photoUri = uri
+                                            takePictureLauncher.launch(uri)
+                                        }
+                                    } else {
+                                        pendingTakePhoto = true
+                                        requestCameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
                                     }
                                 },
                                 onRecordVideoClick = {
-                                    val uri = createVideoUri()
-                                    if (uri != null) {
-                                        videoUri = uri
-                                        captureVideoLauncher.launch(uri)
+                                    if (checkSelfPermission(android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                        val uri = createVideoUri()
+                                        if (uri != null) {
+                                            videoUri = uri
+                                            captureVideoLauncher.launch(uri)
+                                        }
+                                    } else {
+                                        pendingRecordVideo = true
+                                        requestCameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
                                     }
                                 },
                                 onRemoveEvidenceClick = { path ->
