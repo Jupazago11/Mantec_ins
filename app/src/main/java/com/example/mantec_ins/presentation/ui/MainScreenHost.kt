@@ -58,6 +58,7 @@ fun MainScreenHost(
     onBeltChangeSelected: (Boolean) -> Unit,
     onTakePhotoClick: () -> Unit,
     onRecordVideoClick: () -> Unit,
+    onPickFromGallery: () -> Unit,
     onRemoveEvidenceClick: (String) -> Unit,
     onBackClick: () -> Unit,
     onSaveClick: () -> Unit,
@@ -105,6 +106,7 @@ fun MainScreenHost(
             onBeltChangeSelected = onBeltChangeSelected,
             onTakePhotoClick = onTakePhotoClick,
             onRecordVideoClick = onRecordVideoClick,
+            onPickFromGallery = onPickFromGallery,
             onRemoveEvidenceClick = onRemoveEvidenceClick,
             onBackClick = onBackClick,
             onSaveClick = onSaveClick

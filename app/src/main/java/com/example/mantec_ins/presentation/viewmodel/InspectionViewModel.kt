@@ -40,7 +40,6 @@ class InspectionViewModel(
             selectedComponentId = componentId,
             selectedDiagnosticId = null,
             selectedConditionId = null,
-            recommendation = "",
             evidences = emptyList(),
             isBeltChange = false,
             message = null
@@ -52,7 +51,6 @@ class InspectionViewModel(
         _uiState.value = _uiState.value.copy(
             selectedDiagnosticId = diagnosticId,
             selectedConditionId = null,
-            recommendation = "",
             evidences = emptyList(),
             isBeltChange = false,
             message = null

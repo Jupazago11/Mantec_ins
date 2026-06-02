@@ -93,7 +93,7 @@ Mantec_ins/
 | `data/remote/` | Retrofit: DTOs de red, interfaces de servicios, cliente HTTP con interceptores. |
 | `data/repository/` | Capa de abstracción: los repositorios coordinan acceso local y remoto. |
 | `domain/model/` | Modelos de dominio puros (sin anotaciones de Room ni Retrofit). |
-| `presentation/ui/` | Pantallas Compose (composables de nivel pantalla). |
+| `presentation/ui/` | Pantallas y secciones Compose (composables de nivel pantalla y sub-secciones reutilizables). |
 | `presentation/viewmodel/` | ViewModels, UI States, factories de inyección manual. |
 | `presentation/navigation/` | Definición de rutas de navegación (AppScreen sealed class). |
 | `sync/` | SyncWorker y SyncWorkManager para sincronización en background. |
@@ -227,9 +227,14 @@ Interfaces Retrofit anotadas con `@GET`, `@POST`, `@Multipart`, etc.
 |---|---|---|
 | `LoginViewModel` | LoginScreen | Autenticación, manejo de errores de red |
 | `CatalogViewModel` | MainScreenHost | Carga cascada de catálogo (área→elemento→componente→...) |
-| `InspectionViewModel` | MainScreenHost | Estado del formulario de inspección, guardar reporte |
+| `InspectionViewModel` | MainScreenHost / ReportFormScreen | Estado del formulario de inspección, guardar reporte individual. Cambiar componente o diagnóstico conserva la recomendación escrita; solo cambiar el elemento la limpia. |
+| `InspectionBatchViewModel` | MainScreenHost | Evaluación en lote: evalúa múltiples diagnósticos a la vez para un componente seleccionado |
+| `RemoteCatalogViewModel` | MainScreenHost | Estrategia local-first: carga catálogo local primero y luego refresca desde remoto en segundo plano |
 | `DashboardViewModel` | HomeScreen | Pendientes, estado semanal, reportes recientes |
 | `ReportListViewModel` | HomeScreen | Lista de reportes pendientes de sync |
+| `ReportDetailViewModel` | HomeScreen | Carga el detalle completo de un reporte guardado (componentes, diagnósticos, condiciones, evidencias) |
+| `SyncViewModel` | HomeScreen | Ejecuta `syncPendingReports()` y expone el conteo de reportes sincronizados |
+| `MeasurementPendingViewModel` | HomeScreen | Conteo de borradores de medición pendientes; verifica acceso al módulo de mediciones |
 | `MeasurementThicknessViewModel` | MeasurementThicknessScreen | Selección, edición y guardado de mediciones |
 | `AppNavigationViewModel` | MainActivity | Control central de navegación |
 | `InspectorProfileViewModel` | HomeScreen | Perfil del inspector logueado |
@@ -285,18 +290,20 @@ Se usan tres tablas de caché para evitar consultas remotas repetidas:
 ### Endpoints detectados
 
 #### Autenticación y catálogo
-| Método | Endpoint | Descripción |
-|---|---|---|
-| POST | `/api/login` | Autenticación de usuario |
-| GET | `/api/inspector/offline-catalog` | Descarga catálogo completo offline |
-| GET | `/api/inspector/elements/{elementId}/pending-diagnostics` | Diagnósticos pendientes de un elemento |
-| GET | `/api/inspector/clients/{clientId}/areas` | Áreas de un cliente |
-| GET | `/api/inspector/elements/{elementId}/conditions` | Condiciones de un elemento |
-| GET | `/api/inspector/areas/{areaId}/elements` | Elementos de un área |
-| GET | `/api/inspector/elements/{elementId}/components` | Componentes de un elemento |
-| GET | `/api/inspector/elements/{elementId}/weekly-diagnostic-status` | Estado semanal de diagnósticos |
-| GET | `/api/inspector/components/{componentId}/diagnostics` | Diagnósticos de un componente |
-| GET | `/api/inspector/areas/{areaId}/weekly-elements-status` | Estado semanal de elementos del área |
+| Método | Endpoint | Descripción | Servicio |
+|---|---|---|---|
+| POST | `/api/login` | Autenticación de usuario | `AuthApiService` |
+| GET | `/api/inspector/offline-catalog` | Descarga catálogo completo offline | `AuthApiService` |
+| GET | `/api/inspector/elements/{elementId}/pending-diagnostics` | Diagnósticos pendientes de un elemento | `AuthApiService` |
+| GET | `/api/inspector/clients/{clientId}/areas` | Áreas de un cliente | `AuthApiService` |
+| GET | `/api/inspector/elements/{elementId}/conditions` | Condiciones de un elemento | `AuthApiService` |
+| GET | `/api/inspector/areas/{areaId}/elements` | Elementos de un área | `AuthApiService` |
+| GET | `/api/inspector/elements/{elementId}/components` | Componentes de un elemento | `AuthApiService` |
+| GET | `/api/inspector/elements/{elementId}/weekly-diagnostic-status` | Estado semanal de diagnósticos | `AuthApiService` |
+| GET | `/api/inspector/components/{componentId}/diagnostics` | Diagnósticos de un componente | `AuthApiService` |
+| GET | `/api/inspector/areas/{areaId}/weekly-elements-status` | Estado semanal de elementos del área | `AuthApiService` |
+| GET | `/api/catalog/version` | Versión actual del catálogo | `ApiService` |
+| GET | `/inspector/elements/{elementId}/pending-diagnostics` | Diagnósticos pendientes (versión alternativa sin prefijo `/api/`) | `ApiService` |
 
 #### Sincronización de reportes
 | Método | Endpoint | Descripción |
@@ -421,19 +428,30 @@ SyncRepository.syncPendingReports()
 ### MainScreenHost (Módulo de Reportes / Inspección)
 - **Flujo cascada de selección:**
   1. Seleccionar área geográfica.
-  2. Seleccionar tipo de elemento.
+  2. Seleccionar tipo de elemento (se omite si el grupo solo tiene uno).
   3. Ver lista de elementos del área y tipo.
   4. Seleccionar elemento.
   5. Seleccionar componente del elemento.
   6. Seleccionar diagnóstico del componente.
   7. Seleccionar condición (con código de severidad y color).
-- **Formulario de inspección:**
-  - Campo de texto libre para recomendación.
-  - Checkbox "Cambio de banda".
-  - Botón para tomar foto.
-  - Botón para grabar video.
-  - Lista de evidencias adjuntas (con opción de eliminar).
-- **Guardar:** Crea `ReportEntity` + `ReportDetailEntity` + `EvidenceEntity` en Room con `PENDING_SYNC`.
+- **Composable del formulario:** el formulario completo de creación de reporte está extraído en `ReportFormScreen.kt` (ver sección siguiente).
+- **Guardar:** Crea `ReportEntity` + `ReportDetailEntity` + `EvidenceEntity` en Room con `PENDING_SYNC`. Al guardar se limpian diagnóstico, condición, recomendación y evidencias, pero se conservan el elemento y componente seleccionados para agilizar reportes consecutivos del mismo activo.
+
+### ReportFormScreen (`ReportFormScreen.kt`)
+Composable que contiene toda la UI del formulario de nuevo reporte. Fue extraído de `MainScreenHost` para mantener la pantalla principal más manejable.
+- **Campos progresivos:** los dropdowns se habilitan en cascada (Área → Tipo de activo → Activo → Componente → Diagnóstico → Condición). Cada picker se muestra como un campo tipo botón que abre un `AlertDialog` con la lista de opciones.
+- **Indicadores de progreso visual en las listas:**
+  - Ícono verde `CheckCircle`: el ítem ya fue completado y confirmado por el servidor.
+  - Badge "P" naranja: el ítem tiene un reporte guardado localmente (`PENDING_SYNC`) que aún no fue sincronizado.
+- **Campo "Cambio de banda":** aparece solo cuando el componente es "Banda" y el diagnóstico es "Estado". Son radio buttons Sí/No.
+- **Sección de evidencias:** muestra thumbnail de imagen/video. Botones disponibles: "Tomar foto" y "Grabar video" (abren la cámara), y "Galería" (abre el selector nativo del SO con selección múltiple de imágenes y videos). Las evidencias se limpian al cambiar componente o diagnóstico, pero la recomendación no.
+- **Botón "Guardar reporte"** solo visible cuando se ha seleccionado al menos un diagnóstico (o hay uno solo disponible).
+- **Header:** muestra la semana ISO actual (S{semana} / año) usando `GregorianCalendar` con `firstDayOfWeek = MONDAY` y `minimalDaysInFirstWeek = 4`.
+
+### Secciones de HomeScreen
+La pantalla `HomeScreen` tiene componentes Compose extraídos en archivos propios:
+- **`PendingDiagnosticsSection.kt`:** muestra los diagnósticos pendientes de la semana actual.
+- **`RecentReports24hSection.kt`:** muestra los reportes creados en las últimas 24 horas.
 
 ### MeasurementThicknessScreen (Mediciones de Espesor)
 - **Flujo de selección:**
@@ -465,6 +483,10 @@ SyncRepository.syncPendingReports()
 ### Interceptor HTTP
 - `AuthInterceptor` inyecta `Authorization: Bearer {token}` en cada request automáticamente.
 - Si no hay token, el header no se adjunta (el servidor retornaría 401).
+- Si el servidor responde 401 en cualquier endpoint autenticado (token expirado), `AuthInterceptor` llama a `TokenExpirationEvent.emit()`.
+
+### TokenExpirationEvent
+Objeto singleton (`data/remote/TokenExpirationEvent.kt`) que expone un `SharedFlow<Unit>`. El `AuthInterceptor` lo emite cuando detecta un 401. `MainActivity` (u otro observador) debe colectar este flow y ejecutar el logout/relogin automático. Resuelve el riesgo #5 de las versiones anteriores.
 
 ### Datos de sesión almacenados
 - `userId`, `userName`, `username`, `roleKey`, `clientId`, `clientName`, `elementTypeId`, `elementTypeName`, `token`.
@@ -497,8 +519,8 @@ SyncRepository.syncPendingReports()
 4. **Token JWT en SharedPreferences sin cifrado**
    - Ver sección 11.
 
-5. **Sin manejo de token expirado en runtime**
-   - Si el usuario deja la app en segundo plano y el token expira, los intentos de sincronización fallarán silenciosamente o con mensajes genéricos sin forzar reautenticación.
+5. ~~**Sin manejo de token expirado en runtime**~~ **→ RESUELTO PARCIALMENTE**
+   - `AuthInterceptor` ahora detecta respuestas 401 y emite `TokenExpirationEvent`. El mecanismo de detección está implementado. Pendiente: verificar que `MainActivity` colecta el flow y fuerza el logout automático.
 
 6. **cleartext traffic en producción**
    - El `network_security_config.xml` tiene `cleartextTrafficPermitted="true"`. Si la URL base es siempre HTTPS, esto no es un problema práctico, pero es un riesgo de configuración.
@@ -541,8 +563,8 @@ SyncRepository.syncPendingReports()
 3. **Migrar a Hilt para inyección de dependencias**
    - Eliminar la inyección manual en `MainActivity`. Hilt generará el grafo automáticamente, reducirá el boilerplate y facilitará el testing.
 
-4. **Implementar manejo de token expirado (401 interceptor)**
-   - Agregar un `Authenticator` de OkHttp que detecte respuestas 401 en cualquier endpoint y fuerce el logout/relogin automático.
+4. ~~**Implementar manejo de token expirado (401 interceptor)**~~ **→ RESUELTO PARCIALMENTE**
+   - `AuthInterceptor` ya emite `TokenExpirationEvent` en respuestas 401. Verificar que `MainActivity` colecta el flow y ejecuta el logout automático.
 
 5. **Agregar Mutex o flag en SyncRepository**
    - Proteger `syncPendingReports()` con un `Mutex` o un `AtomicBoolean` para evitar sincronizaciones concurrentes desde el Worker y el botón manual.
@@ -631,6 +653,18 @@ Arquitectónicamente usa MVVM + Clean Architecture con Room, Retrofit y WorkMana
 ---
 
 ## 16. Historial de versiones
+
+### v1.6.2 — Galería múltiple y preservación de recomendación
+
+**Archivos modificados:** `MainActivity.kt`, `MainScreenHost.kt`, `ReportFormScreen.kt`, `InspectionViewModel.kt`
+
+**Cambios:**
+
+1. **Selector de galería con selección múltiple** — Se agregó el botón "Galería" en la sección de evidencias del formulario. Usa `PickMultipleVisualMedia` (Activity 1.10.1+), que abre el selector nativo del SO y permite elegir varias fotos y/o videos a la vez. El tipo de cada archivo (imagen/video) se detecta automáticamente por MIME type. No requiere permisos adicionales en el manifest.
+
+2. **Recomendación no se borra al cambiar componente o diagnóstico** — En `InspectionViewModel`, `setSelectedComponent()` y `setSelectedDiagnostic()` ya no limpian el campo `recommendation`. El texto se preserva si el inspector corrige su selección. Solo se limpia al cambiar el elemento completo (`setSelectedElement()`) o al guardar el reporte exitosamente.
+
+---
 
 ### v1.6.1 — Corrección crash al tomar foto/video
 

@@ -93,6 +93,7 @@ fun ReportFormScreen(
     onBeltChangeSelected: (Boolean) -> Unit,
     onTakePhotoClick: () -> Unit,
     onRecordVideoClick: () -> Unit,
+    onPickFromGallery: () -> Unit,
     onRemoveEvidenceClick: (String) -> Unit,
     onBackClick: () -> Unit,
     onSaveClick: () -> Unit
@@ -550,6 +551,7 @@ fun ReportFormScreen(
                         evidenceItems = inspectionUiState.evidences,
                         onTakePhotoClick = onTakePhotoClick,
                         onRecordVideoClick = onRecordVideoClick,
+                        onPickFromGallery = onPickFromGallery,
                         onRemoveEvidenceClick = onRemoveEvidenceClick
                     )
 
@@ -1511,6 +1513,7 @@ private fun EvidenceSection(
     evidenceItems: List<MediaEvidenceUi>,
     onTakePhotoClick: () -> Unit,
     onRecordVideoClick: () -> Unit,
+    onPickFromGallery: () -> Unit,
     onRemoveEvidenceClick: (String) -> Unit
 ) {
     Column(
@@ -1539,6 +1542,15 @@ private fun EvidenceSection(
             ) {
                 Text("Grabar video")
             }
+        }
+
+        OutlinedButton(
+            onClick = onPickFromGallery,
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, MantecOrange),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MantecOrange)
+        ) {
+            Text("Galería")
         }
 
         if (evidenceItems.isEmpty()) {

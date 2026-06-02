@@ -1,6 +1,7 @@
 package com.example.mantec_ins
 
 import android.content.ContentValues
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -10,6 +11,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
@@ -474,6 +477,22 @@ class MainActivity : ComponentActivity() {
                 ) { success ->
                     if (success && videoUri != null) {
                         inspectionVM.addEvidence(videoUri.toString(), "video")
+                    }
+                }
+
+                val pickFromGalleryLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.PickMultipleVisualMedia()
+                ) { uris ->
+                    uris.forEach { uri ->
+                        try {
+                            contentResolver.takePersistableUriPermission(
+                                uri,
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION
+                            )
+                        } catch (_: SecurityException) { }
+                        val mimeType = contentResolver.getType(uri) ?: ""
+                        val mediaType = if (mimeType.startsWith("video")) "video" else "image"
+                        inspectionVM.addEvidence(uri.toString(), mediaType)
                     }
                 }
 
@@ -1073,6 +1092,11 @@ class MainActivity : ComponentActivity() {
                                         pendingRecordVideo = true
                                         requestCameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
                                     }
+                                },
+                                onPickFromGallery = {
+                                    pickFromGalleryLauncher.launch(
+                                        PickVisualMediaRequest(PickVisualMedia.ImageAndVideo)
+                                    )
                                 },
                                 onRemoveEvidenceClick = { path ->
                                     inspectionVM.removeEvidence(path)
