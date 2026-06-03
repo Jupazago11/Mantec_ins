@@ -55,52 +55,59 @@ class SyncRepository(
                     "Iniciando sync de reporte localId=${report.localId}"
                 )
 
-                val reportRequest = SyncReportRequest(
-                    local_report_id = report.localId,
-                    client_id = report.clientId,
-                    area_id = report.areaId,
-                    element_id = report.elementId,
-                    component_id = detail.componentId,
-                    diagnostic_id = detail.diagnosticId,
-                    condition_id = detail.conditionId,
-                    recommendation = detail.recommendation,
-                    week = detail.week,
-                    year = detail.year,
-                    execution_date = detail.executionDate,
-                    is_belt_change = detail.isBeltChange
-                )
+                val serverReportDetailId: Long
 
-                Log.d(
-                    "RECOMMENDATION_DEBUG",
-                    "Antes de sync: '${detail.recommendation}'"
-                )
-
-                val reportResponse = api.syncReport(reportRequest)
-
-                if (!reportResponse.isSuccessful) {
-                    Log.e(
+                if (detail.syncStatus == "SYNCED" && detail.serverId != null) {
+                    // El detalle ya fue aceptado por el servidor en un intento anterior.
+                    // No reenviar: solo reintentar las evidencias pendientes con el ID ya guardado.
+                    Log.d(
                         "SYNC_REPOSITORY",
-                        "syncReport falló para ${report.localId}. code=${reportResponse.code()}"
+                        "Reporte ${report.localId} ya enviado al servidor (serverId=${detail.serverId}). Reintentando solo evidencias."
                     )
-                    continue
-                }
-
-                val reportBody = reportResponse.body()
-                if (reportBody == null) {
-                    Log.e(
-                        "SYNC_REPOSITORY",
-                        "syncReport respondió sin body para ${report.localId}"
+                    serverReportDetailId = detail.serverId
+                } else {
+                    val reportRequest = SyncReportRequest(
+                        local_report_id = report.localId,
+                        client_id = report.clientId,
+                        area_id = report.areaId,
+                        element_id = report.elementId,
+                        component_id = detail.componentId,
+                        diagnostic_id = detail.diagnosticId,
+                        condition_id = detail.conditionId,
+                        recommendation = detail.recommendation,
+                        week = detail.week,
+                        year = detail.year,
+                        execution_date = detail.executionDate,
+                        is_belt_change = detail.isBeltChange
                     )
-                    continue
+
+                    val reportResponse = api.syncReport(reportRequest)
+
+                    if (!reportResponse.isSuccessful) {
+                        Log.e(
+                            "SYNC_REPOSITORY",
+                            "syncReport falló para ${report.localId}. code=${reportResponse.code()}"
+                        )
+                        continue
+                    }
+
+                    val reportBody = reportResponse.body()
+                    if (reportBody == null) {
+                        Log.e(
+                            "SYNC_REPOSITORY",
+                            "syncReport respondió sin body para ${report.localId}"
+                        )
+                        continue
+                    }
+
+                    serverReportDetailId = reportBody.server_report_detail_id
+
+                    reportDetailDao.updateSyncData(
+                        reportLocalId = report.localId,
+                        serverId = serverReportDetailId,
+                        syncStatus = "SYNCED"
+                    )
                 }
-
-                val serverReportDetailId = reportBody.server_report_detail_id
-
-                reportDetailDao.updateSyncData(
-                    reportLocalId = report.localId,
-                    serverId = serverReportDetailId,
-                    syncStatus = "SYNCED"
-                )
 
                 val evidences = evidenceDao.getByReport(report.localId)
                 var allFilesSynced = true
