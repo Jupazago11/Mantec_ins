@@ -508,8 +508,8 @@ Objeto singleton (`data/remote/TokenExpirationEvent.kt`) que expone un `SharedFl
    - Room está configurado con migración destructiva (versión 19). Cualquier cambio en el esquema de la base de datos eliminará todos los datos locales del usuario. Esto es crítico si hay reportes `PENDING_SYNC` que aún no se han sincronizado.
    - **Riesgo:** Pérdida de datos de inspección en campo al actualizar la app.
 
-2. **Posible pérdida de evidencias en fallo parcial de sync**
-   - Si el reporte se sincroniza exitosamente pero la carga de una evidencia falla, el estado del `ReportDetailEntity` podría quedar inconsistente. No se evidencia un mecanismo de rollback o retry granular por evidencia.
+2. ~~**Posible pérdida de evidencias en fallo parcial de sync**~~ **→ RESUELTO (v1.6.3)**
+   - Si la carga de evidencias falla, `ReportEntity` queda `PENDING_SYNC` aunque el detail ya esté `SYNCED`. En sync posteriores se omite el reenvío al servidor (evitando concatenación duplicada de recomendación) y se reintenta solo la subida de evidencias usando el `serverId` almacenado.
 
 3. **MainActivity de ~1481 líneas**
    - Toda la inyección de dependencias, lógica de restauración de sesión, configuración de launchers de cámara y lógica de navegación está concentrada en `MainActivity`. Esto viola el principio de responsabilidad única y hace el código difícil de mantener, testear y escalar.
@@ -579,8 +579,8 @@ Objeto singleton (`data/remote/TokenExpirationEvent.kt`) que expone un `SharedFl
 7. **Deshabilitar logging en producción**
    - Usar `BuildConfig.DEBUG` para condicionar `HttpLoggingInterceptor.Level.BODY` solo en debug.
 
-8. **Implementar retry granular para evidencias**
-   - Si falla la carga de una evidencia, marcarla como `PENDING_SYNC` individualmente y reintentarla en la próxima sincronización sin re-sincronizar el reporte completo.
+8. ~~**Implementar retry granular para evidencias**~~ **→ RESUELTO (v1.6.3)**
+   - `SyncRepository` ya verifica `detail.syncStatus` antes de reenviar al servidor. Si el detail está `SYNCED`, solo reintenta las evidencias pendientes.
 
 9. **Optimizar queries con JOINs**
    - Reemplazar el enriquecimiento de datos en ViewModel (múltiples queries) por consultas Room con `@Relation` o JOINs SQL.
@@ -653,6 +653,22 @@ Arquitectónicamente usa MVVM + Clean Architecture con Room, Retrofit y WorkMana
 ---
 
 ## 16. Historial de versiones
+
+### v1.6.3 — Fix recomendación duplicada por reenvío del mismo reporte al servidor
+
+**Archivo modificado:** `SyncRepository.kt`
+
+**Problema:** Cuando la subida de evidencias fallaba (red cortada, URI inaccesible, etc.), `ReportEntity` quedaba con `status = PENDING_SYNC` aunque `ReportDetailEntity.syncStatus` ya fuera `SYNCED`. En el siguiente intento de sync, el mismo reporte se reenviaba al servidor. El servidor tiene lógica de negocio que concatena la recomendación cuando recibe múltiples reportes del mismo elemento+componente+diagnóstico en el mismo día, produciendo texto repetido N veces (tantas como intentos fallidos hubo).
+
+**Causa raíz:** `reportDao.updateStatus(SYNCED)` solo se ejecuta si TODAS las evidencias suben correctamente. Si alguna falla, `ReportEntity` nunca se marca como `SYNCED` y vuelve a ser procesado en cada sync.
+
+**Fix:** En `doSyncPendingReports()`, antes de llamar `api.syncReport()`, se verifica `detail.syncStatus`:
+- Si es `SYNCED` y `detail.serverId != null` → el reporte ya fue aceptado por el servidor. Se omite el `api.syncReport()` y se reintenta solo la subida de evidencias pendientes usando el `serverId` almacenado.
+- Si es `PENDING_SYNC` → flujo normal: se envía al servidor, se guarda el `serverId`.
+
+**La concatenación legítima no se afecta:** cuando el inspector crea un segundo reporte distinto (nuevo `localId`) para el mismo activo/componente/diagnóstico el mismo día, ese reporte llega al servidor por primera vez con `syncStatus = PENDING_SYNC` y el servidor lo concatena correctamente.
+
+---
 
 ### v1.6.2 — Galería múltiple y preservación de recomendación
 
