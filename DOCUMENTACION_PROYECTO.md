@@ -654,6 +654,23 @@ Arquitectónicamente usa MVVM + Clean Architecture con Room, Retrofit y WorkMana
 
 ## 16. Historial de versiones
 
+### v1.7.0 — Dictado de voz en campo Recomendación
+
+**Archivos modificados:** `AndroidManifest.xml`, `app/build.gradle.kts`, `MainActivity.kt`, `MainScreenHost.kt`, `ReportFormScreen.kt`
+
+**Funcionalidad:** El inspector puede dictar la recomendación usando el micrófono del dispositivo en lugar de escribirla manualmente. Un botón 🎤 naranja aparece junto al label "Recomendación" en el formulario de nuevo reporte.
+
+**Implementación:**
+- `AndroidManifest.xml`: se declara el permiso `RECORD_AUDIO`.
+- `build.gradle.kts`: se agrega la dependencia `material-icons-extended` para el ícono `Icons.Filled.Mic`.
+- `MainActivity.kt`: se registra `speechRecognizerLauncher` (`StartActivityForResult` con `RecognizerIntent.ACTION_RECOGNIZE_SPEECH`) y `requestAudioPermissionLauncher` (`RequestPermission`). Al pulsar el botón, se verifica si el permiso ya fue concedido; si no, se solicita antes de lanzar el reconocedor. El texto reconocido se agrega al final del texto ya escrito (no lo reemplaza).
+- `MainScreenHost.kt` y `ReportFormScreen.kt`: propagación del callback `onVoiceInputClick` por la cadena de composables.
+- `ReportTextArea`: el botón de micrófono se ubica en la misma fila que el label, alineado a la derecha.
+
+**Comportamiento offline:** usa el reconocedor de voz del sistema Android (`RecognizerIntent`). Si el dispositivo tiene paquetes de idioma offline instalados (común en Android moderno con Google Speech Services), funciona sin conexión a internet.
+
+---
+
 ### v1.6.3 — Fix recomendación duplicada por reenvío del mismo reporte al servidor
 
 **Archivo modificado:** `SyncRepository.kt`
