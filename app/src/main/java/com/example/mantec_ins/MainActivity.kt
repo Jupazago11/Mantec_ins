@@ -1,12 +1,15 @@
 package com.example.mantec_ins
 
+import android.app.Activity
 import android.content.ContentValues
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import android.speech.RecognizerIntent
 import android.util.Log
+import java.util.Locale
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -563,6 +566,35 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                val speechRecognizerLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.StartActivityForResult()
+                ) { result ->
+                    if (result.resultCode == Activity.RESULT_OK) {
+                        val matches = result.data
+                            ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                        val recognized = matches?.firstOrNull()
+                        if (!recognized.isNullOrBlank()) {
+                            val current = inspectionVM.uiState.value.recommendation
+                            val updated = if (current.isBlank()) recognized
+                                         else "$current $recognized"
+                            inspectionVM.setRecommendation(updated)
+                        }
+                    }
+                }
+
+                val requestAudioPermissionLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission()
+                ) { isGranted ->
+                    if (isGranted) {
+                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                            putExtra(RecognizerIntent.EXTRA_PROMPT, "Dicta la recomendación")
+                        }
+                        speechRecognizerLauncher.launch(intent)
+                    }
+                }
+
                 LaunchedEffect(currentScreen, elements) {
                     if (
                         currentScreen == AppScreen.Report &&
@@ -1068,6 +1100,18 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onBeltChangeSelected = { value ->
                                     inspectionVM.setIsBeltChange(value)
+                                },
+                                onVoiceInputClick = {
+                                    if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                                            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                                            putExtra(RecognizerIntent.EXTRA_PROMPT, "Dicta la recomendación")
+                                        }
+                                        speechRecognizerLauncher.launch(intent)
+                                    } else {
+                                        requestAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                                    }
                                 },
                                 onTakePhotoClick = {
                                     if (checkSelfPermission(android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) {

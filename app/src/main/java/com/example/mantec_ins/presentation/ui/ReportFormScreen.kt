@@ -36,6 +36,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material3.IconButton
 import androidx.compose.ui.platform.LocalContext
 import com.example.mantec_ins.presentation.viewmodel.MediaEvidenceUi
 
@@ -91,6 +93,7 @@ fun ReportFormScreen(
     onConditionSelected: (Long) -> Unit,
     onRecommendationChange: (String) -> Unit,
     onBeltChangeSelected: (Boolean) -> Unit,
+    onVoiceInputClick: () -> Unit,
     onTakePhotoClick: () -> Unit,
     onRecordVideoClick: () -> Unit,
     onPickFromGallery: () -> Unit,
@@ -545,7 +548,8 @@ fun ReportFormScreen(
                         label = "Recomendación",
                         value = inspectionUiState.recommendation,
                         placeholder = "Describe la acción recomendada",
-                        onValueChange = onRecommendationChange
+                        onValueChange = onRecommendationChange,
+                        onVoiceInputClick = onVoiceInputClick
                     )
                     EvidenceSection(
                         evidenceItems = inspectionUiState.evidences,
@@ -1469,17 +1473,38 @@ private fun ReportTextArea(
     label: String,
     value: String,
     placeholder: String,
-    onValueChange: (String) -> Unit
+    onValueChange: (String) -> Unit,
+    onVoiceInputClick: (() -> Unit)? = null
 ) {
     Column(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Medium,
-            color = TextPrimary
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Medium,
+                color = TextPrimary
+            )
+
+            if (onVoiceInputClick != null) {
+                IconButton(
+                    onClick = onVoiceInputClick,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Mic,
+                        contentDescription = "Dictar recomendación",
+                        tint = MantecOrange,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        }
 
         OutlinedTextField(
             value = value,
