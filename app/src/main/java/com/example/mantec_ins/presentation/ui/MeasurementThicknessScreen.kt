@@ -37,11 +37,15 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -639,25 +643,33 @@ private fun NumberField(
     modifier: Modifier,
     onValueChange: (String) -> Unit
 ) {
-    var text by remember(value) {
-        mutableStateOf(value?.toString() ?: "")
+    var text by rememberSaveable { mutableStateOf("") }
+
+    // Populate only on initial DB load (when field is still empty and a value arrives)
+    LaunchedEffect(value) {
+        if (text.isEmpty() && value != null) {
+            text = if (value == value.toLong().toDouble()) value.toLong().toString()
+                   else value.toString()
+        }
     }
 
     OutlinedTextField(
         value = text,
         onValueChange = { newValue ->
-            val sanitized = newValue
-                .replace(",", ".")
-                .filter { it.isDigit() || it == '.' }
-
+            val filtered = newValue.replace(",", ".").filter { it.isDigit() || it == '.' }
+            val sanitized = if (filtered.count { it == '.' } > 1) {
+                val firstDot = filtered.indexOf('.')
+                filtered.substring(0, firstDot + 1) + filtered.substring(firstDot + 1).replace(".", "")
+            } else {
+                filtered
+            }
             text = sanitized
             onValueChange(sanitized)
         },
         modifier = modifier,
-        label = {
-            Text(label)
-        },
+        label = { Text(label) },
         singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
         shape = RoundedCornerShape(14.dp),
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = MantecOrange,

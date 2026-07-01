@@ -548,8 +548,7 @@ fun ReportFormScreen(
                         label = "Recomendación",
                         value = inspectionUiState.recommendation,
                         placeholder = "Describe la acción recomendada",
-                        onValueChange = onRecommendationChange,
-                        onVoiceInputClick = onVoiceInputClick
+                        onValueChange = onRecommendationChange
                     )
                     EvidenceSection(
                         evidenceItems = inspectionUiState.evidences,

@@ -1,6 +1,7 @@
 # Documentación general del proyecto
 
 **Proyecto:** Mantec Inspector (Mantec_ins)
+**Versión actual:** 1.7.5 (versionCode 7)
 **Lenguaje:** Kotlin 100%
 **Plataforma:** Android nativo
 **Fecha de análisis:** Mayo 2026
@@ -536,8 +537,8 @@ Objeto singleton (`data/remote/TokenExpirationEvent.kt`) que expone un `SharedFl
 
 ### Menores
 
-10. **Logging verboso en producción**
-    - `HttpLoggingInterceptor.Level.BODY` registra todo el cuerpo de las requests/responses. Esto puede exponer datos sensibles en logs de producción.
+10. ~~**Logging verboso en producción**~~ **→ RESUELTO (v1.7.4)**
+    - `HttpLoggingInterceptor.Level.BODY` causaba `OutOfMemoryError` al descargar el catálogo offline (~145 MB). Reemplazado por `Level.HEADERS` en debug y `Level.NONE` en release.
 
 11. **Seed de base de datos comentado**
     - Hay código comentado en `MainActivity` para sembrar datos de prueba. Debe eliminarse o moverse a un archivo de debug dedicado.
@@ -653,6 +654,95 @@ Arquitectónicamente usa MVVM + Clean Architecture con Room, Retrofit y WorkMana
 ---
 
 ## 16. Historial de versiones
+
+### v1.7.5 — Reducir descargas del catálogo offline (ahorro de datos móviles)
+
+**Archivo modificado:** `MainActivity.kt`
+
+**Problema:** `syncOfflineCatalog()` (descarga ~145 MB) se ejecutaba en tres momentos innecesarios:
+1. Cada vez que la app volvía del fondo (`onResume` con `autoSync = true`)
+2. Después de cada reporte guardado (`refreshCatalogAfterSync = true` en post-save)
+3. Después de cada sincronización manual (`refreshCatalogAfterSync = true` en manual sync)
+
+En una jornada típica con 20 reportes y 10 vueltas del fondo, esto generaba ~4.3 GB de consumo de datos solo por el catálogo.
+
+**Aclaración:** el avance de los compañeros (badges DONE/PENDING por elemento y diagnóstico) **no depende del catálogo**. Se actualiza mediante endpoints independientes (`getWeeklyDiagnosticStatus`, `getWeeklyElementsStatus`) que siguen llamándose igual.
+
+**Fix aplicado:**
+- Se eliminó `syncOfflineCatalog()` del bloque `if (autoSync)` en `onResume()`. Se conserva `SyncWorkManager.start()` para que el scheduler de background siga activo.
+- Se cambió `refreshCatalogAfterSync = true` → `false` en el post-guardado y en el sync manual.
+
+**Cuándo se descarga el catálogo ahora:**
+- Al hacer login (siempre).
+- Si la DB local está vacía al restaurar la sesión (proceso matado por MIUI).
+
+---
+
+### v1.7.4 — Fix OutOfMemoryError por HttpLoggingInterceptor con respuesta grande
+
+**Archivo modificado:** `RetrofitClient.kt`
+
+**Problema:** La app se cerraba con `java.lang.OutOfMemoryError` al descargar el catálogo offline. El error ocurría exactamente en `HttpLoggingInterceptor.intercept`, que intentaba leer todo el cuerpo de la respuesta de `/api/inspector/offline-catalog` como String para loguearlo. La respuesta pesa ~145 MB; en dispositivos con poca RAM (gama baja Xiaomi/MIUI) con solo ~24 MB libres, la alocación fallaba y la app se cerraba.
+
+**Causa raíz:** `HttpLoggingInterceptor.Level.BODY` bufferiza la respuesta HTTP completa en memoria como String antes de loguearla. Con respuestas grandes (catálogo offline), esto excede el heap disponible del proceso Android.
+
+**Fix:** Se reemplaza `Level.BODY` por lógica condicional sobre `BuildConfig.DEBUG`:
+- En **debug**: `Level.HEADERS` — registra método, URL, status y cabeceras, suficiente para depurar.
+- En **release**: `Level.NONE` — sin logging HTTP, sin riesgo de OOM ni exposición de datos.
+
+**Nota:** este riesgo estaba documentado como "Menor" en la sección 12, pero el tamaño real del catálogo offline (~145 MB) lo convierte en un crash reproducible en dispositivos de gama baja.
+
+---
+
+### v1.7.3 — Fix crash al restaurar la app desde background (dispositivos MIUI/Xiaomi)
+
+**Archivos modificados:** `DashboardViewModel.kt`, `MainActivity.kt`
+
+**Problema:** La app se cerraba de manera forzosa en dispositivos Xiaomi/MIUI cuando el inspector minimizaba la app y luego intentaba regresar a ella. El crash ocurría al llegar a la HomeScreen: a veces de inmediato, a veces ~2 segundos después.
+
+**Causa raíz:** Cuatro bloques `viewModelScope.launch {}` y `lifecycleScope.launch {}` no tenían `try-catch`. En Android, una excepción no capturada dentro de estas corrutinas cierra la app de forma inmediata (el sistema no la puede recuperar). MIUI es especialmente sensible porque mata el proceso en background de forma agresiva; cuando Android lo recrea, la base de datos Room puede estar en un estado de recuperación WAL por unos milisegundos, y cualquier query de DAO en esa ventana puede fallar.
+
+**Cambios en `DashboardViewModel.kt`:**
+- `loadPendingDiagnosticsForElement()`: se envuelve todo el cuerpo del `viewModelScope.launch` en `try/catch`. Un fallo al leer el caché de diagnósticos pendientes ya no cierra la app.
+- `loadWeeklyElementsStatus()`: ídem. Un fallo al leer el caché de estado semanal por área/tipo ya no cierra la app.
+- `loadWeeklyElementsStatusForElements()`: ídem. Un fallo al leer el estado semanal para múltiples elementos ya no cierra la app.
+- `loadRecentReports24h()`: ídem. Un fallo al cargar reportes + entidades de catálogo (elemento, componente, diagnóstico, condición) ya no cierra la app.
+
+**Cambios en `MainActivity.kt`:**
+- Callback `onFinished` del auto-sync en HomeScreen (línea del `LaunchedEffect(currentScreen)`): se agrega `try/catch` al `lifecycleScope.launch` que ejecuta `syncAllPendingDrafts()` y actualiza el mensaje de éxito. Un fallo post-sync ya no cierra la app.
+- Callback `onFinished` del sync manual (botón "Sincronizar"): ídem. Además se asegura que `isManualSyncRunning = false` en el `catch`, para que el botón no quede bloqueado si falla.
+
+**Por qué el timing era distinto:**
+- *Crash inmediato*: `loadRecentReports24h()` se llama en `onCreate()` antes de que la HomeScreen aparezca; si la DB aún recupera el WAL, falla de inmediato.
+- *Crash ~2 segundos*: el sync de red tarda ~2s; al completarse, el callback sin `try/catch` ejecutaba `syncAllPendingDrafts()` y si fallaba, cerraba la app en ese momento.
+
+---
+
+### v1.7.2 — Ocultar icono de micrófono en campo Recomendación
+
+**Archivo modificado:** `ReportFormScreen.kt`
+
+**Cambio:** Se deja de pasar el callback `onVoiceInputClick` al composable `ReportTextArea`, por lo que el botón 🎤 no se renderiza. La implementación completa de dictado de voz (permisos, launchers, lógica en `MainActivity`) permanece intacta para habilitarse en una versión futura.
+
+---
+
+### v1.7.1 — Mejoras de UX en módulo de mediciones
+
+**Archivos modificados:** `MeasurementThicknessScreen.kt`, `AndroidManifest.xml`
+
+**Cambios:**
+
+1. **Teclado numérico decimal en campos de medición** — Se agrega `KeyboardOptions(keyboardType = KeyboardType.Decimal)` al `NumberField`. El teclado ya no cambia a letras al enfocar un campo de espesor o dureza.
+
+2. **El campo no auto-formatea el número del usuario** — Se reemplaza `remember(value)` (con clave `Double`) por `rememberSaveable` sin clave + `LaunchedEffect`. Antes, al escribir "12" el ViewModel almacenaba `12.0` y el campo se reseteaba a `"12.0"`. Ahora el texto que escribe el inspector es el que se muestra, sin interferencia.
+
+3. **Punto decimal ya no borra el valor anterior** — El comportamiento roto era: escribir "12.", el `toDoubleOrNull("12.")` devolvía `null`, el campo se vaciaba. Con el desacoplamiento del paso anterior, el inspector puede escribir "12.5" de forma natural.
+
+4. **Filtro de doble punto decimal** — La sanitización ahora descarta cualquier segundo punto: `"5.2.8"` → `"5.28"`.
+
+5. **Scroll con teclado abierto** — Se agrega `android:windowSoftInputMode="adjustResize"` en `AndroidManifest.xml`. Antes el teclado cubría la pantalla sin posibilidad de hacer scroll; ahora Android reduce el área de la app al espacio sobre el teclado y el scroll existente funciona normalmente.
+
+---
 
 ### v1.7.0 — Dictado de voz en campo Recomendación
 

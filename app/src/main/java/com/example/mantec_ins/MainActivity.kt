@@ -645,30 +645,34 @@ class MainActivity : ComponentActivity() {
                                 }
                             ) { syncedCount ->
                                 lifecycleScope.launch {
-                                    val syncedMeasurementDrafts = measurementThicknessRepository.syncAllPendingDrafts()
-                                    measurementPendingVM.loadPendingDraftCount()
+                                    try {
+                                        val syncedMeasurementDrafts = measurementThicknessRepository.syncAllPendingDrafts()
+                                        measurementPendingVM.loadPendingDraftCount()
 
-                                    when {
-                                        syncedCount > 0 && syncedMeasurementDrafts > 0 -> {
-                                            homeSyncMessage =
-                                                "Se sincronizaron $syncedCount reportes y $syncedMeasurementDrafts borradores de mediciones."
-                                        }
+                                        when {
+                                            syncedCount > 0 && syncedMeasurementDrafts > 0 -> {
+                                                homeSyncMessage =
+                                                    "Se sincronizaron $syncedCount reportes y $syncedMeasurementDrafts borradores de mediciones."
+                                            }
 
-                                        syncedCount > 0 -> {
-                                            homeSyncMessage = if (syncedCount == 1) {
-                                                "Se subió 1 reporte correctamente."
-                                            } else {
-                                                "Se subieron $syncedCount reportes correctamente."
+                                            syncedCount > 0 -> {
+                                                homeSyncMessage = if (syncedCount == 1) {
+                                                    "Se subió 1 reporte correctamente."
+                                                } else {
+                                                    "Se subieron $syncedCount reportes correctamente."
+                                                }
+                                            }
+
+                                            syncedMeasurementDrafts > 0 -> {
+                                                homeSyncMessage = if (syncedMeasurementDrafts == 1) {
+                                                    "Se sincronizó 1 borrador de mediciones."
+                                                } else {
+                                                    "Se sincronizaron $syncedMeasurementDrafts borradores de mediciones."
+                                                }
                                             }
                                         }
-
-                                        syncedMeasurementDrafts > 0 -> {
-                                            homeSyncMessage = if (syncedMeasurementDrafts == 1) {
-                                                "Se sincronizó 1 borrador de mediciones."
-                                            } else {
-                                                "Se sincronizaron $syncedMeasurementDrafts borradores de mediciones."
-                                            }
-                                        }
+                                    } catch (e: Exception) {
+                                        Log.e("AUTO_SYNC", "Error post-sync automático en HomeScreen", e)
                                     }
                                 }
                             }
@@ -687,7 +691,7 @@ class MainActivity : ComponentActivity() {
                                 selectedAreaIdProvider = { selectedAreaId },
                                 selectedElementTypeIdProvider = { selectedElementTypeId },
                                 visibleElementsProvider = { elements },
-                                refreshCatalogAfterSync = true,
+                                refreshCatalogAfterSync = false,
                                 onBlocked = { message ->
                                     homeSyncWarning = message
                                 }
@@ -917,44 +921,49 @@ class MainActivity : ComponentActivity() {
                                         selectedAreaIdProvider = { selectedAreaId },
                                         selectedElementTypeIdProvider = { selectedElementTypeId },
                                         visibleElementsProvider = { elements },
-                                        refreshCatalogAfterSync = true,
+                                        refreshCatalogAfterSync = false,
                                         onBlocked = { message ->
                                             homeSyncWarning = message
                                         }
                                     ) { syncedCount ->
                                         lifecycleScope.launch {
-                                            val syncedMeasurementDrafts = measurementThicknessRepository.syncAllPendingDrafts()
-                                            measurementPendingVM.loadPendingDraftCount()
+                                            try {
+                                                val syncedMeasurementDrafts = measurementThicknessRepository.syncAllPendingDrafts()
+                                                measurementPendingVM.loadPendingDraftCount()
 
-                                            isManualSyncRunning = false
+                                                isManualSyncRunning = false
 
-                                            homeSyncMessage = when {
-                                                syncedCount > 0 && syncedMeasurementDrafts > 0 -> {
-                                                    "Se sincronizaron $syncedCount reportes y $syncedMeasurementDrafts borradores de mediciones."
+                                                homeSyncMessage = when {
+                                                    syncedCount > 0 && syncedMeasurementDrafts > 0 -> {
+                                                        "Se sincronizaron $syncedCount reportes y $syncedMeasurementDrafts borradores de mediciones."
+                                                    }
+
+                                                    syncedCount == 1 -> {
+                                                        "Se subió 1 reporte correctamente y se actualizó la información."
+                                                    }
+
+                                                    syncedCount > 1 -> {
+                                                        "Se subieron $syncedCount reportes correctamente y se actualizó la información."
+                                                    }
+
+                                                    syncedMeasurementDrafts == 1 -> {
+                                                        "Se sincronizó 1 borrador de mediciones y se actualizó la información."
+                                                    }
+
+                                                    syncedMeasurementDrafts > 1 -> {
+                                                        "Se sincronizaron $syncedMeasurementDrafts borradores de mediciones y se actualizó la información."
+                                                    }
+
+                                                    else -> {
+                                                        "No había reportes ni borradores de mediciones pendientes por sincronizar. La información fue actualizada."
+                                                    }
                                                 }
 
-                                                syncedCount == 1 -> {
-                                                    "Se subió 1 reporte correctamente y se actualizó la información."
-                                                }
-
-                                                syncedCount > 1 -> {
-                                                    "Se subieron $syncedCount reportes correctamente y se actualizó la información."
-                                                }
-
-                                                syncedMeasurementDrafts == 1 -> {
-                                                    "Se sincronizó 1 borrador de mediciones y se actualizó la información."
-                                                }
-
-                                                syncedMeasurementDrafts > 1 -> {
-                                                    "Se sincronizaron $syncedMeasurementDrafts borradores de mediciones y se actualizó la información."
-                                                }
-
-                                                else -> {
-                                                    "No había reportes ni borradores de mediciones pendientes por sincronizar. La información fue actualizada."
-                                                }
+                                                connectionLabel = NetworkUtils.connectionLabel(this@MainActivity)
+                                            } catch (e: Exception) {
+                                                Log.e("MANUAL_SYNC", "Error post-sync manual en HomeScreen", e)
+                                                isManualSyncRunning = false
                                             }
-
-                                            connectionLabel = NetworkUtils.connectionLabel(this@MainActivity)
                                         }
                                     }
                                 },
@@ -1264,12 +1273,6 @@ class MainActivity : ComponentActivity() {
                 val syncedMeasurementDrafts = measurementRepository.syncAllPendingDrafts()
 
                 if (autoSync) {
-                    // Si la agrupación permite sync automático, también refrescamos catálogo.
-                    val remoteCatalogRepository = RemoteCatalogRepository(
-                        apiService = RetrofitClient.createAuthApiService(this@MainActivity),
-                        database = db
-                    )
-                    remoteCatalogRepository.syncOfflineCatalog()
                     com.example.mantec_ins.sync.SyncWorkManager.start(this@MainActivity)
                 }
 

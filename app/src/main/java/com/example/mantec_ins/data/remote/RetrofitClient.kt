@@ -1,6 +1,7 @@
 package com.example.mantec_ins.data.remote
 
 import android.content.Context
+import com.example.mantec_ins.BuildConfig
 import com.example.mantec_ins.data.local.SessionManager
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -16,7 +17,11 @@ object RetrofitClient {
         val sessionManager = SessionManager(context)
 
         val logging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
+            level = if (BuildConfig.DEBUG) {
+                HttpLoggingInterceptor.Level.HEADERS
+            } else {
+                HttpLoggingInterceptor.Level.NONE
+            }
         }
 
         return OkHttpClient.Builder()
