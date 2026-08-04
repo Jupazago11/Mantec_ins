@@ -1,10 +1,11 @@
 # Documentación general del proyecto
 
 **Proyecto:** Mantec Inspector (Mantec_ins)
-**Versión actual:** 1.7.5 (versionCode 7)
+**Versión actual:** 1.7.6 (versionCode 8)
 **Lenguaje:** Kotlin 100%
 **Plataforma:** Android nativo
-**Fecha de análisis:** Mayo 2026
+**Fecha de análisis inicial:** Mayo 2026
+**Última actualización:** 2026-08-04 (ver v1.7.6 en la sección 16 para el detalle del cambio)
 
 ---
 
@@ -70,7 +71,7 @@ Mantec_ins/
 │   │       │   │   ├── ui/                     # Pantallas Compose
 │   │       │   │   └── viewmodel/              # ViewModels + UI States
 │   │       │   ├── sync/                       # WorkManager: Worker + Manager
-│   │       │   ├── util/                       # Utilidades (NetworkUtils, etc.)
+│   │       │   ├── util/                       # Utilidades (NetworkUtils, etc.        )
 │   │       │   ├── ui/theme/                   # Colores, tipografía, tema Compose
 │   │       │   └── MainActivity.kt             # Actividad única
 │   │       ├── res/
@@ -402,7 +403,7 @@ SyncRepository.syncPendingReports()
 ### Elementos aún incompletos / a verificar
 
 - No se evidencia manejo de conflictos si el mismo elemento se sincroniza desde dos dispositivos distintos.
-- No hay retry automático granular por evidencia fallida; si una foto falla, todo el reporte podría quedar en estado inconsistente.
+- ~~No hay retry automático granular por evidencia fallida~~ **→ RESUELTO PARCIALMENTE (v1.7.6)**: cada evidencia se reintenta de forma independiente (ya existía), y desde v1.7.6 una evidencia rechazada permanentemente por el backend (422/413) se marca `ERROR` y deja de reintentarse en cada sync. Sigue pendiente: si una evidencia falla de forma *transitoria* de manera repetida (red inestable), el reporte queda indefinidamente en `PENDING_SYNC` sin límite de reintentos ni backoff.
 - La estrategia de caché de diagnósticos pendientes (`PendingDiagnosticCacheEntity`) indica que el servidor es la fuente de verdad para el estado semanal, pero no hay lógica clara de invalidación de caché.
 
 ---
@@ -538,7 +539,7 @@ Objeto singleton (`data/remote/TokenExpirationEvent.kt`) que expone un `SharedFl
 ### Menores
 
 10. ~~**Logging verboso en producción**~~ **→ RESUELTO (v1.7.4)**
-    - `HttpLoggingInterceptor.Level.BODY` causaba `OutOfMemoryError` al descargar el catálogo offline (~145 MB). Reemplazado por `Level.HEADERS` en debug y `Level.NONE` en release.
+    - `HttpLoggingInterceptor.Level.BODY` causaba `OutOfMemoryError` al descargar el catálogo offline (~145 MB confirmados por crash log real; el cliente/grupo exacto detrás de ese tamaño aún no está identificado, ver nota en historial v1.7.4). Reemplazado por `Level.HEADERS` en debug y `Level.NONE` en release.
 
 11. **Seed de base de datos comentado**
     - Hay código comentado en `MainActivity` para sembrar datos de prueba. Debe eliminarse o moverse a un archivo de debug dedicado.
@@ -655,16 +656,74 @@ Arquitectónicamente usa MVVM + Clean Architecture con Room, Retrofit y WorkMana
 
 ## 16. Historial de versiones
 
+### v1.7.6 — Fix OutOfMemoryError al subir evidencia de video + soporte de archivos de hasta 1 GB
+
+**Fecha:** 2026-08-04
+
+**Archivos modificados:** `SyncRepository.kt`, `EvidenceDao.kt`, `RetrofitClient.kt`, `HomeScreen.kt`, `app/build.gradle.kts`
+
+**Este es un bug distinto al de v1.7.4/v1.7.5.** Aquel era al *descargar* el catálogo offline; este es al *subir* evidencia (foto/video) durante la sincronización de un reporte. Comparten el mismo patrón de causa raíz (bufferizar algo grande completo en memoria en vez de transmitirlo en streaming), pero en puntos distintos del código.
+
+**El error — evidencia real (reporte de usuario vía Play Store):**
+```
+java.lang.OutOfMemoryError: Failed to allocate a 167548040 byte allocation
+with 25165824 free bytes and 91MB until OOM, target footprint 197782128,
+growth limit 268435456
+    at java.util.Arrays.copyOf(Arrays.java:4276)
+    at java.io.ByteArrayOutputStream.toByteArray(ByteArrayOutputStream.java:211)
+    at kotlin.io.ByteStreamsKt.readBytes(IOStreams.kt:137)
+    at com.example.mantec_ins.data.repository.SyncRepository.buildMultipartFromUri(SyncRepository.kt:211)
+    at com.example.mantec_ins.data.repository.SyncRepository.doSyncPendingReports(SyncRepository.kt:120)
+    ...
+```
+`167548040` bytes ≈ **159.8 MB** — el tamaño de un video de evidencia que el inspector intentó sincronizar.
+
+**Causa raíz:** `buildMultipartFromUri()` hacía `inputStream.use { it.readBytes() }`, cargando el archivo completo (foto o video) a un `ByteArray` en memoria antes de armar el `MultipartBody.Part` para subirlo. Con un video de ~160 MB y ~24-25 MB libres de heap en el dispositivo, la asignación fallaba. Es el mismo patrón que en v1.7.4 (bufferizar en vez de transmitir), pero acá afecta a **cualquier subida de evidencia grande**, sin relación con `HttpLoggingInterceptor` ni con el catálogo.
+
+**Contexto de negocio que amplió el alcance del fix:** en paralelo se descubrió que el backend limitaba el tamaño de archivo de evidencia a 100 MB (validación Laravel `max:102400` + `php.ini`). La opción evaluada fue limitar la duración de grabación de video en la app para mantenerse bajo ese límite, pero se descartó: los videos de inspección a veces son legítimamente largos y superan los 100 MB. Se optó en cambio por **subir el límite del backend a 1024 MB (1 GB)**, lo que hizo que arreglar el streaming en la app dejara de ser opcional — sin el fix, subir el nuevo límite del backend solo habría aumentado la frecuencia del crash, no resuelto nada, porque el crash ocurre en el dispositivo *antes* de que el archivo llegue a la red.
+
+**Verificación de coordinación con el backend (Laravel), con evidencia real, no solo lectura de código:**
+- **Streaming end-to-end confirmado en el backend:** `InspectorSyncFileController`/`AdminReportEvidenceController` usan `fopen()` + `Storage::disk('r2')->writeStream()`, y la librería AWS S3 (`ObjectUploader`/`MultipartUploader`) sube en partes de ~5 MB leyendo el stream progresivamente. Nunca carga el archivo completo a una variable de PHP — se descartó explícitamente el riesgo de memoria del lado servidor.
+- **Validación de Laravel actualizada:** `max:102400` → `max:1048576` en ambos controladores.
+- **`php.ini` de producción (Railway) confirmado vía `/php-upload-check`:** `upload_max_filesize=1024M`, `post_max_size=1100M`, `memory_limit=1024M` (subido desde 128M como margen de seguridad, aunque el streaming ya lo hacía innecesario), `max_execution_time=300` (5 minutos).
+- **Sin Cloudflare de por medio** (dominio pega directo al edge de Railway) — descarta el límite duro de 100 MB que Cloudflare Free/Pro impone.
+- **Pendiente, no verificable desde el código:** límite propio del edge de Railway y comportamiento real de timeouts en producción — el backend recomendó una prueba real con un archivo de ~500-900 MB desde la app para confirmarlo en vivo. **Esa prueba end-to-end todavía no se ha ejecutado.**
+- Los errores 422 del backend llegan en inglés (`"The file field must not be greater than 1048576 kilobytes."`) porque falta `lang/es` en el proyecto Laravel — brecha de localización identificada y dejada pendiente del lado del backend, no se tradujo el mensaje crudo en la app (ver más abajo por qué).
+
+**Fix aplicado (tres cambios coordinados):**
+
+1. **Streaming real en `buildMultipartFromUri()`** (`SyncRepository.kt`): se elimina `readBytes()`. El `RequestBody` ahora abre el `InputStream` dentro de `writeTo()` y lo transmite directo al `sink` de red vía `inputStream.source().use { sink.writeAll(source) }` (Okio), sin retener nunca el archivo completo en memoria. El tamaño para `contentLength()` se obtiene sin leer el archivo, vía `ContentResolver.openAssetFileDescriptor(uri, "r")?.length`; si no se puede determinar, se devuelve `-1` y OkHttp usa `Transfer-Encoding: chunked` (el backend lo soporta sin problema). Con esto, subir un archivo de 10 MB o de 1 GB consume la misma memoria pico (unos pocos KB del buffer de streaming de Okio), en vez de escalar linealmente con el tamaño del archivo.
+
+2. **Timeouts en `RetrofitClient.kt`:** se agregan `connectTimeout` (20s) y `writeTimeout`/`readTimeout` (15 minutos) al `OkHttpClient.Builder()` — antes no había ninguno configurado, así que aplicaban los defaults de OkHttp (10s), insuficientes para subir archivos grandes. Se descartó alinear el timeout al `max_execution_time=300s` del backend (idea inicial): ese contador de PHP mide tiempo de ejecución del script, no el tiempo que tarda el archivo en transmitirse hasta el servidor, así que no acota de forma confiable cuánto puede tardar una subida real. Se optó por 15 minutos para darle margen a un inspector subiendo evidencia grande con datos móviles y señal débil en campo, en vez de cortar la subida prematuramente por un timeout del lado del cliente.
+
+3. **Evidencia con rechazo permanente ya no se reintenta indefinidamente** (`SyncRepository.kt` + `EvidenceDao.kt`): si `uploadReportFile` responde 422 o 413 (rechazo de validación, ej. archivo que igual supera 1 GB), la evidencia se marca `syncStatus = "ERROR"` (nuevo método `EvidenceDao.updateStatus()`) y el loop de sync la salta en intentos futuros (`if (evidence.syncStatus == "SYNCED" || evidence.syncStatus == "ERROR")`). Antes, cualquier fallo de subida dejaba la evidencia en `PENDING_SYNC` para siempre, reintentando en cada sync sin posibilidad de éxito. Fallos transitorios (red caída, 5xx, timeout) siguen sin marcarse como `ERROR` y se reintentan normalmente — solo se corta el reintento cuando el backend confirma que el archivo nunca va a ser aceptado.
+
+4. **Mensaje de progreso durante la subida** (`HomeScreen.kt`): con el timeout de red en 15 minutos, un sync manual con video grande podía dejar el botón "Sincronizar" deshabilitado en silencio por varios minutos sin ninguna explicación, dando la impresión de que la app se congeló. Se agregó un banner visible mientras `isManualSyncRunning == true` ("Subiendo evidencia, esto puede tardar varios minutos con datos móviles. No cierres la app."), reutilizando los colores ya definidos para el estado "SYNCING" de los badges de reportes pendientes. Es solo un mensaje informativo, no una barra de progreso real — la app no tiene forma de saber cuánto falta de una subida en curso sin instrumentar el propio `RequestBody`, algo que se dejó fuera de este alcance.
+
+**Decisiones de alcance (por qué se hizo así y no de otra forma):**
+- **Se reutilizó el valor `"ERROR"` en la columna `syncStatus` ya existente**, siguiendo el mismo patrón que `MeasurementThicknessRepository` ya usa para sus borradores (`syncStatus IN ('PENDING_SYNC', 'CONFLICT', 'ERROR')`). Esto evitó agregar una columna nueva a `EvidenceEntity`, lo que a su vez evitó tener que subir la versión de Room (hoy 19, con `fallbackToDestructiveMigration()` — ver riesgo crítico #1 en sección 12). Subir la versión de Room habría borrado todos los reportes `PENDING_SYNC` de los inspectores en el próximo update de la app, un efecto secundario mucho peor que el bug que se estaba arreglando.
+- **No se tradujo el mensaje de error 422 del backend ni se guardó en un campo nuevo `lastError`** para mostrarlo en la UI del inspector. Por ahora el rechazo permanente solo queda registrado en logs (`Log.e`) y en el estado interno `ERROR` de la evidencia; el reporte en la UI actual sigue viéndose como "no sincronizado" sin detalle del motivo. Mostrar un mensaje claro en español al inspector requiere trabajo de UI (`ReportListViewModel`, pantallas de HomeScreen) que no se hizo en este cambio — queda como tarea de seguimiento explícita, no como omisión accidental.
+- **No se limitó la duración de grabación de video en la app.** Fue una decisión de negocio explícita: los videos de inspección pueden ser legítimamente largos. La combinación streaming (app) + límite de 1 GB (backend) + timeout de red de 15 minutos (app) es la solución elegida en su lugar.
+
+**Verificación de compilación (2026-08-04):** se corrió `gradlew compileDebugKotlin` con `--rerun-tasks` (recompilación forzada, sin caché) sobre el JDK embebido de Android Studio. `BUILD SUCCESSFUL`, 16/16 tareas ejecutadas. Sin errores ni warnings nuevos en `SyncRepository.kt`, `EvidenceDao.kt`, `RetrofitClient.kt` ni `HomeScreen.kt`. Los únicos warnings del build son preexistentes y no relacionados (índices faltantes en `ElementComponentCrossRef`/`ComponentDiagnosticCrossRef`, e íconos deprecados `Icons.Outlined.ExitToApp` / `Icons.Filled.ArrowBack` en pantallas no tocadas en este cambio). Antes de esta verificación se confirmó además, contra los `.jar` reales de Okio en el caché de Gradle del proyecto, que `InputStream.source()` y `BufferedSink.writeAll(Source)` existen con la firma exacta usada en el fix.
+
+**Pendientes explícitos para cerrar el ciclo (a la fecha, 2026-08-04):**
+- Ejecutar la prueba real de subida con un archivo de ~500-900 MB en una conexión de datos móviles típica, para confirmar que el edge de Railway no corta la conexión antes de completarse. **Esta es la única verificación que sigue sin hacerse** — todo lo demás (código, compilación, coordinación con backend) ya quedó confirmado.
+- Backend: publicar `lang/es` para que los mensajes de validación lleguen en español (hoy la app no depende de ese texto para nada crítico, pero sería una mejora de UX si en el futuro se decide mostrarlo).
+- Opcional/futuro: si se decide mostrar al inspector por qué una evidencia específica no se pudo sincronizar, agregar un campo `lastError` a `EvidenceEntity` (esto sí requeriría una migración de Room — planear junto con otras migraciones pendientes, no una por una).
+
+---
+
 ### v1.7.5 — Reducir descargas del catálogo offline (ahorro de datos móviles)
 
 **Archivo modificado:** `MainActivity.kt`
 
-**Problema:** `syncOfflineCatalog()` (descarga ~145 MB) se ejecutaba en tres momentos innecesarios:
+**Problema:** `syncOfflineCatalog()` se ejecutaba en tres momentos innecesarios:
 1. Cada vez que la app volvía del fondo (`onResume` con `autoSync = true`)
 2. Después de cada reporte guardado (`refreshCatalogAfterSync = true` en post-save)
 3. Después de cada sincronización manual (`refreshCatalogAfterSync = true` en manual sync)
 
-En una jornada típica con 20 reportes y 10 vueltas del fondo, esto generaba ~4.3 GB de consumo de datos solo por el catálogo.
+**Nota sobre el consumo de datos estimado:** la proyección de ~4.3 GB/día asumía un peso de catálogo de ~145 MB por descarga, cifra confirmada como real para al menos un cliente/grupo concreto (ver evidencia de crash log en v1.7.4). Sin embargo, una validación sobre el backend (2026-06-19) midió solo ~130 KB para el grupo más grande *probado* en ese momento (`group_id=2`), lo que sugiere que el tamaño del catálogo varía enormemente entre clientes/grupos — desde cientos de KB hasta decenas de MB — y aún no está identificado qué cliente/grupo corresponde al caso de ~145 MB. El problema de descargas redundantes que motivó este fix es real independientemente de la magnitud exacta del ahorro; falta reconciliar el rango real de tamaños de catálogo por cliente para dimensionar el ahorro de datos móviles con precisión.
 
 **Aclaración:** el avance de los compañeros (badges DONE/PENDING por elemento y diagnóstico) **no depende del catálogo**. Se actualiza mediante endpoints independientes (`getWeeklyDiagnosticStatus`, `getWeeklyElementsStatus`) que siguen llamándose igual.
 
@@ -682,15 +741,28 @@ En una jornada típica con 20 reportes y 10 vueltas del fondo, esto generaba ~4.
 
 **Archivo modificado:** `RetrofitClient.kt`
 
-**Problema:** La app se cerraba con `java.lang.OutOfMemoryError` al descargar el catálogo offline. El error ocurría exactamente en `HttpLoggingInterceptor.intercept`, que intentaba leer todo el cuerpo de la respuesta de `/api/inspector/offline-catalog` como String para loguearlo. La respuesta pesa ~145 MB; en dispositivos con poca RAM (gama baja Xiaomi/MIUI) con solo ~24 MB libres, la alocación fallaba y la app se cerraba.
+**Problema:** La app se cerraba con `java.lang.OutOfMemoryError` al descargar el catálogo offline. El error ocurría exactamente en `HttpLoggingInterceptor.intercept`, que intentaba leer todo el cuerpo de la respuesta de `/api/inspector/offline-catalog` como String para loguearlo. En dispositivos con poca RAM (gama baja Xiaomi/MIUI) con solo ~24 MB libres, la alocación fallaba y la app se cerraba.
 
-**Causa raíz:** `HttpLoggingInterceptor.Level.BODY` bufferiza la respuesta HTTP completa en memoria como String antes de loguearla. Con respuestas grandes (catálogo offline), esto excede el heap disponible del proceso Android.
+**Evidencia real del crash (reporte de usuario vía Play Store):**
+```
+java.lang.OutOfMemoryError: Failed to allocate a 151889552 byte allocation
+with 25165824 free bytes and 98MB until OOM, target footprint 190411968,
+growth limit 268435456
+    at java.lang.StringFactory.newStringFromUtf8Bytes
+    at okio.Buffer.readString(Buffer.kt:313)
+    at okhttp3.logging.HttpLoggingInterceptor.intercept(HttpLoggingInterceptor.kt:209)
+    at com.example.mantec_ins.data.remote.AuthInterceptor.intercept(AuthInterceptor.kt:22)
+    ...
+```
+`151889552` bytes ≈ **144.86 MB**, y `25165824` bytes ≈ **24 MB libres** — de aquí salen las cifras "~145 MB" y "~24 MB libres" citadas en el documento. Como el fallo ocurre en `okio.Buffer.readString()`, que decodifica directamente los bytes ya bufferizados del cuerpo de la respuesta (sin duplicación por crecimiento de buffer en ese punto), esta cifra **sí corresponde al tamaño real** del cuerpo de esa respuesta HTTP puntual, no a un artefacto del mensaje de OOM.
+
+**Causa raíz:** `HttpLoggingInterceptor.Level.BODY` bufferiza la respuesta HTTP completa en memoria como String antes de loguearla. Con una respuesta de ese tamaño, esto excede el heap disponible del proceso Android.
 
 **Fix:** Se reemplaza `Level.BODY` por lógica condicional sobre `BuildConfig.DEBUG`:
 - En **debug**: `Level.HEADERS` — registra método, URL, status y cabeceras, suficiente para depurar.
 - En **release**: `Level.NONE` — sin logging HTTP, sin riesgo de OOM ni exposición de datos.
 
-**Nota:** este riesgo estaba documentado como "Menor" en la sección 12, pero el tamaño real del catálogo offline (~145 MB) lo convierte en un crash reproducible en dispositivos de gama baja.
+**Pendiente de reconciliar:** una investigación sobre el backend (2026-06-19, `InspectorOfflineCatalogController@show`) midió, con datos reales de producción, que el catálogo del grupo más grande *conocido en ese momento* (`group_id=2`, 109 elementos) pesa solo ~130 KB sin comprimir — muy por debajo de los ~145 MB de este crash real. Esto indica que el cliente/grupo que sufrió este crash específico **no es el mismo** que se probó, y probablemente tiene un volumen de activos varios órdenes de magnitud mayor. Falta identificar (vía Play Console: fecha, dispositivo, usuario asociado al reporte) qué cliente/grupo generó este catálogo de ~145 MB y repetir la medición del backend sobre ese grupo puntual, en vez de asumir que el mayor grupo conocido representa el peor caso real.
 
 ---
 

@@ -12,6 +12,8 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.source
+import java.io.IOException
 
 class SyncRepository(
     private val context: Context,
@@ -113,7 +115,7 @@ class SyncRepository(
                 var allFilesSynced = true
 
                 evidences.forEachIndexed { index, evidence ->
-                    if (evidence.syncStatus == "SYNCED") {
+                    if (evidence.syncStatus == "SYNCED" || evidence.syncStatus == "ERROR") {
                         return@forEachIndexed
                     }
 
@@ -156,6 +158,18 @@ class SyncRepository(
                             )
                             allFilesSynced = false
                         }
+                    } else if (uploadResponse.code() == 422 || uploadResponse.code() == 413) {
+                        // Rechazo permanente del backend (ej. archivo supera el límite
+                        // de tamaño validado en Laravel). Reintentar no cambiaría el
+                        // resultado, así que se marca ERROR para dejar de intentarlo
+                        // en cada sync en vez de reintentar indefinidamente.
+                        Log.e(
+                            "SYNC_REPOSITORY",
+                            "Evidencia id=${evidence.id} rechazada permanentemente por el servidor " +
+                                "(code=${uploadResponse.code()}). No se reintentará."
+                        )
+                        evidenceDao.updateStatus(id = evidence.id, syncStatus = "ERROR")
+                        allFilesSynced = false
                     } else {
                         Log.e(
                             "SYNC_REPOSITORY",
@@ -207,15 +221,28 @@ class SyncRepository(
             val mimeType = resolver.getType(uri) ?: "application/octet-stream"
             val fileName = queryFileName(uri) ?: "upload_${System.currentTimeMillis()}"
 
-            val inputStream = resolver.openInputStream(uri) ?: return null
-            val bytes = inputStream.use { it.readBytes() }
+            // Verifica que el archivo se pueda abrir antes de armar el request,
+            // sin leer su contenido (evita cargarlo completo en memoria).
+            resolver.openInputStream(uri)?.close() ?: return null
 
+            val fileLength = queryFileLength(uri)
+
+            // El body transmite el archivo en streaming directo desde el
+            // InputStream hacia el sink de red, en vez de cargarlo completo a
+            // un ByteArray. Con evidencia de video de cientos de MB (hasta 1 GB,
+            // ver v1.8.0), leer todo a memoria antes de enviarlo agotaba el heap
+            // del proceso y crasheaba la app con OutOfMemoryError.
             val requestBody = object : RequestBody() {
                 override fun contentType() = mimeType.toMediaType()
-                override fun contentLength(): Long = bytes.size.toLong()
+                override fun contentLength(): Long = fileLength ?: -1L
 
                 override fun writeTo(sink: okio.BufferedSink) {
-                    sink.write(bytes)
+                    val inputStream = resolver.openInputStream(uri)
+                        ?: throw IOException("No se pudo abrir el archivo: $uri")
+
+                    inputStream.source().use { source ->
+                        sink.writeAll(source)
+                    }
                 }
             }
 
@@ -226,6 +253,17 @@ class SyncRepository(
             )
         } catch (e: Exception) {
             Log.e("SYNC_REPOSITORY", "Error creando multipart desde uri=$uriString", e)
+            null
+        }
+    }
+
+    private fun queryFileLength(uri: Uri): Long? {
+        return try {
+            context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { descriptor ->
+                descriptor.length.takeIf { it >= 0 }
+            }
+        } catch (e: Exception) {
+            Log.w("SYNC_REPOSITORY", "No se pudo determinar el tamaño del archivo para uri=$uri", e)
             null
         }
     }

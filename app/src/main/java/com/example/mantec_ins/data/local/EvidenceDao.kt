@@ -28,6 +28,13 @@ interface EvidenceDao {
         serverFileId: Long
     )
 
+    @Query("""
+        UPDATE evidences
+        SET syncStatus = :syncStatus
+        WHERE id = :id
+    """)
+    suspend fun updateStatus(id: Long, syncStatus: String)
+
     @Query("DELETE FROM evidences")
     suspend fun deleteAll()
 }

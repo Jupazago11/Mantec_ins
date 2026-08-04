@@ -245,6 +245,37 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        if (isManualSyncRunning) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = SyncingBadgeBg,
+                border = BorderStroke(1.dp, Color(0xFFBFDBFE))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = SyncingBadgeText,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.padding(horizontal = 6.dp))
+                    Text(
+                        text = "Subiendo evidencia, esto puede tardar varios minutos con datos móviles. No cierres la app.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = SyncingBadgeText
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
         syncSuccessMessage?.let { message ->
             Surface(
                 modifier = Modifier.fillMaxWidth(),
