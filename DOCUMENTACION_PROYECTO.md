@@ -682,7 +682,13 @@ Arquitectónicamente usa MVVM + Clean Architecture con Room, Retrofit y WorkMana
 
 **Hallazgo de backend relacionado, no corregido en esta versión (pendiente para el equipo backend):** `InspectorOfflineCatalogController::show()` exige exactamente una agrupación activa por inspector (422 si tiene 0 o ≥2), mientras que los endpoints puntuales validan contra todas las agrupaciones del inspector. Hoy ningún inspector tiene 2+ agrupaciones activas, así que no genera síntomas actualmente, pero es una asimetría real — si algún inspector llega a tener 2+ agrupaciones, `offline-catalog` fallaría con 422 mientras el resto de la app seguiría funcionando. Recomendado como mejora preventiva, no bloqueante.
 
-**Verificación:** `gradlew compileDebugKotlin --rerun-tasks` — `BUILD SUCCESSFUL` sin errores nuevos. Cambios 1 y 2 verificados en vivo sobre un emulador real (Android 15, AVD `Medium_Phone_API_35`) con sesión y catálogo reales del cliente CORONA: banner verde confirmado en Home con red, log `CATALOG_VM: No se pudo refrescar condiciones remotas... Se mantiene el catálogo local.` confirmado con modo avión activado (sin colgarse), y app verificada estable tras `force-stop` + reapertura sin red (sin pedir login). Cambio 3 (badge de Área) verificado solo por compilación, no se probó visualmente en dispositivo.
+**Verificación:** `gradlew compileDebugKotlin --rerun-tasks` — `BUILD SUCCESSFUL` sin errores nuevos. Los tres cambios se verificaron en vivo sobre un emulador real (Android 15, AVD `Medium_Phone_API_35`) con sesión y catálogo reales del cliente CORONA:
+- **Cambio 1:** banner verde confirmado en Home con red; log `CATALOG_VM: No se pudo refrescar condiciones remotas... Se mantiene el catálogo local.` confirmado con modo avión activado, sin colgarse.
+- **Cambio 2 — ciclo completo detección→reparación:** se borró manualmente en la base de datos local del emulador la relación Componente↔Condición del componente id=4 ("Guardilla", el mismo caso investigado con backend), simulando el hueco real. Sin red, el banner mostró correctamente "Catálogo incompleto: 1 componente sin diagnóstico o condición..." sin bloquear la navegación. Al reactivar WiFi y reabrir la app, `syncOfflineCatalog()` reparó la relación sola y el banner volvió a verde — confirma el ciclo completo, no solo el camino feliz.
+- **Cambio 3 (badge de Área):** confirmado visualmente en el picker de Área — ya no aparece el badge "P" en ningún área (antes lo mostraban "Molino Cemento", "Molino Crudo" y "Reclamador Aditivos").
+- Estabilidad general: app verificada estable tras `force-stop` + reapertura sin red, sin pedir login.
+
+**Sin probar:** build *release* (solo se probó *debug*) y dispositivo físico (solo emulador).
 
 ---
 
