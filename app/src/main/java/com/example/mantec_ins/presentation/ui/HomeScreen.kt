@@ -41,6 +41,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.mantec_ins.presentation.viewmodel.CatalogCompletenessStatus
+import com.example.mantec_ins.presentation.viewmodel.CatalogCompletenessUi
 import com.example.mantec_ins.presentation.viewmodel.PendingSyncReportItemUi
 
 private val HomeBg = Color(0xFFF8F4EE)
@@ -68,6 +70,7 @@ fun HomeScreen(
     pendingSyncItems: List<PendingSyncReportItemUi>,
     pendingMeasurementDraftCount: Int,
     showMeasurementsButton: Boolean,
+    catalogCompleteness: CatalogCompletenessUi,
     syncSuccessMessage: String?,
     syncWarningMessage: String?,
     isManualSyncRunning: Boolean,
@@ -244,6 +247,81 @@ fun HomeScreen(
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+
+        when (catalogCompleteness.status) {
+            CatalogCompletenessStatus.CHECKING -> {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = SyncingBadgeBg,
+                    border = BorderStroke(1.dp, Color(0xFFBFDBFE))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = SyncingBadgeText,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.padding(horizontal = 6.dp))
+                        Text(
+                            text = "Verificando catálogo offline...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = SyncingBadgeText
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            CatalogCompletenessStatus.COMPLETE -> {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = SyncedBadgeBg,
+                    border = BorderStroke(1.dp, Color(0xFFBBF7D0))
+                ) {
+                    Text(
+                        text = "Catálogo completo y actualizado. Podés trabajar sin conexión.",
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = SyncedBadgeText
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            CatalogCompletenessStatus.INCOMPLETE -> {
+                val gapWord = if (catalogCompleteness.gapCount == 1) "componente" else "componentes"
+
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = ErrorBadgeBg,
+                    border = BorderStroke(1.dp, Color(0xFFFECACA))
+                ) {
+                    Text(
+                        text = "Catálogo incompleto: ${catalogCompleteness.gapCount} $gapWord sin diagnóstico o condición. Conectate a WiFi para completarlo antes de salir a planta.",
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = ErrorBadgeText
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            CatalogCompletenessStatus.UNKNOWN -> {}
+        }
 
         if (isManualSyncRunning) {
             Surface(

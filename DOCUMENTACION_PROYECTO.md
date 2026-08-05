@@ -1,11 +1,11 @@
 # Documentación general del proyecto
 
 **Proyecto:** Mantec Inspector (Mantec_ins)
-**Versión actual:** 1.7.6 (versionCode 8)
+**Versión actual:** 1.7.7 (versionCode 9)
 **Lenguaje:** Kotlin 100%
 **Plataforma:** Android nativo
 **Fecha de análisis inicial:** Mayo 2026
-**Última actualización:** 2026-08-04 (ver v1.7.6 en la sección 16 para el detalle del cambio)
+**Última actualización:** 2026-08-05 (ver v1.7.7 en la sección 16 para el detalle del cambio)
 
 ---
 
@@ -656,11 +656,41 @@ Arquitectónicamente usa MVVM + Clean Architecture con Room, Retrofit y WorkMana
 
 ## 16. Historial de versiones
 
-### v1.7.6 — Fix OutOfMemoryError al subir evidencia de video + soporte de archivos de hasta 1 GB
+### v1.7.7 — Fix Condición offline + auditoría de completitud de catálogo + simplificación de íconos de Área
+
+**Fecha:** 2026-08-05
+
+**Archivos modificados:** `CatalogViewModel.kt`, `CatalogLocalRepository.kt`, `CatalogCompletenessResult.kt` (nuevo), `DashboardUiState.kt`, `DashboardViewModel.kt`, `MainActivity.kt`, `HomeScreen.kt`, `ReportFormScreen.kt`, `app/build.gradle.kts`
+
+**Contexto:** un inspector en campo (cliente CORONA) reportó no poder ver las opciones de **Condición** para un componente puntual estando sin conexión, aunque Área/Elemento/Componente/Diagnóstico sí se veían con normalidad (ver foto del reporte de campo). Investigación conjunta con el equipo de backend descartó un bug de query en `offline-catalog` — las tres fuentes comparadas (`offline-catalog`, `GET /elements/{id}/conditions`, `GET /components/{id}/diagnostics`) coincidían exactamente para el caso reportado. La causa más probable fue un catálogo local **desactualizado**: el dispositivo bajó su `offline-catalog` antes de que esa relación Componente↔Condición existiera en el backend, y nunca volvió a refrescarlo con éxito por trabajar casi siempre en zona de señal baja (planta industrial), con WiFi solo disponible al inicio de turno.
+
+**Cambio 1 — Condición local-first (`CatalogViewModel.kt`):**
+- `loadConditionsForComponent()` intentaba el servidor **primero** y solo caía al catálogo local de Room si esa llamada fallaba (por ejemplo, sin red). El `connectTimeout` de Retrofit es de 20s (`RetrofitClient.kt`), así que cada vez que un inspector tocaba un Componente sin señal, la UI se colgaba hasta ese timeout antes de mostrar Condición.
+- Se invirtió el orden: ahora pinta primero desde Room (instantáneo, funciona sin red) y refresca del servidor en segundo plano solo como mejora — si el refresco falla, se queda con el catálogo local sin bloquear ni mostrar error. Mismo patrón *local-first* ya usado en `DashboardViewModel` desde v1.7.6 para los íconos de estado semanal.
+
+**Cambio 2 — Auditoría de completitud de catálogo + banner en HomeScreen:**
+- `CatalogLocalRepository.auditCatalogCompleteness(groupId)` (nuevo): recorre localmente, sin red, todos los elementos del grupo del inspector y detecta componentes sin diagnósticos o sin condiciones asociadas en Room. Devuelve `CatalogCompletenessResult` (nuevo archivo `CatalogCompletenessResult.kt`).
+- `DashboardViewModel.checkCatalogCompleteness(groupId, tryRepairIfIncomplete)` (nuevo): corre la auditoría; si encuentra huecos, intenta repararlos llamando `RemoteCatalogRepository.syncOfflineCatalog()` (solo si hay red — si falla, se captura sin bloquear) y vuelve a auditar. Expone el resultado vía `CatalogCompletenessUi`/`CatalogCompletenessStatus` en `DashboardUiState`.
+- Se dispara automáticamente al entrar a Home (`MainActivity.kt`, nuevo `LaunchedEffect(currentScreen, profile.groupId)`), sin requerir un nuevo login — usa la sesión ya guardada, igual que el resto del auto-sync existente.
+- `HomeScreen.kt` muestra un banner: verde "Catálogo completo y actualizado. Podés trabajar sin conexión." cuando todo está OK, rojo con el conteo de componentes afectados si encuentra huecos que no pudo reparar (por ejemplo, sin WiFi en ese momento), y un estado "verificando" mientras corre.
+- **Objetivo:** que el inspector vea, con el WiFi de inicio de turno en la fábrica, si su catálogo está completo *antes* de salir a la zona de señal baja, en vez de descubrir un hueco recién frente al activo.
+- **Alcance conocido de la auditoría:** cubre específicamente relaciones Componente↔Diagnóstico y Componente↔Condición. No audita otros eslabones de la cadena (por ejemplo, un Área sin Elementos, o un Elemento sin Componentes). Tampoco puede reparar huecos cuyo origen sea el propio backend (dato que nunca existió del lado servidor) — en ese caso el banner rojo queda persistente hasta que se corrija la fuente, que es el comportamiento esperado (avisar, no inventar datos).
+
+**Cambio 3 — Simplificación del ícono de estado por Área (`ReportFormScreen.kt`):**
+- Se eliminó el badge naranja "P" (pendiente/parcial) del picker de **Área**, agregado en la adenda de v1.7.6. Los inspectores pidieron que ya no se muestre ese indicador de avance parcial a nivel Área — ahora solo se ve el ✅ verde cuando el área está **100% completa** (todos sus activos con expectativa esta semana en `DONE`), y ningún ícono en cualquier otro caso (vacía o parcialmente diligenciada). El badge "P" se mantiene sin cambios en los niveles Activo, Componente y Diagnóstico.
+- Se eliminó `localPendingAreaIds` (cálculo que ya no se usa) y se dejó de pasar `pendingSyncIds` al `ProgressiveDropdownField` del picker de Área.
+
+**Hallazgo de backend relacionado, no corregido en esta versión (pendiente para el equipo backend):** `InspectorOfflineCatalogController::show()` exige exactamente una agrupación activa por inspector (422 si tiene 0 o ≥2), mientras que los endpoints puntuales validan contra todas las agrupaciones del inspector. Hoy ningún inspector tiene 2+ agrupaciones activas, así que no genera síntomas actualmente, pero es una asimetría real — si algún inspector llega a tener 2+ agrupaciones, `offline-catalog` fallaría con 422 mientras el resto de la app seguiría funcionando. Recomendado como mejora preventiva, no bloqueante.
+
+**Verificación:** `gradlew compileDebugKotlin --rerun-tasks` — `BUILD SUCCESSFUL` sin errores nuevos. Cambios 1 y 2 verificados en vivo sobre un emulador real (Android 15, AVD `Medium_Phone_API_35`) con sesión y catálogo reales del cliente CORONA: banner verde confirmado en Home con red, log `CATALOG_VM: No se pudo refrescar condiciones remotas... Se mantiene el catálogo local.` confirmado con modo avión activado (sin colgarse), y app verificada estable tras `force-stop` + reapertura sin red (sin pedir login). Cambio 3 (badge de Área) verificado solo por compilación, no se probó visualmente en dispositivo.
+
+---
+
+### v1.7.6 — Fix OutOfMemoryError al subir evidencia de video + soporte de archivos de hasta 1 GB + íconos de estado por Área
 
 **Fecha:** 2026-08-04
 
-**Archivos modificados:** `SyncRepository.kt`, `EvidenceDao.kt`, `RetrofitClient.kt`, `HomeScreen.kt`, `app/build.gradle.kts`
+**Archivos modificados:** `SyncRepository.kt`, `EvidenceDao.kt`, `RetrofitClient.kt`, `HomeScreen.kt`, `app/build.gradle.kts`, `ReportFormScreen.kt`, `DashboardViewModel.kt`
 
 **Este es un bug distinto al de v1.7.4/v1.7.5.** Aquel era al *descargar* el catálogo offline; este es al *subir* evidencia (foto/video) durante la sincronización de un reporte. Comparten el mismo patrón de causa raíz (bufferizar algo grande completo en memoria en vez de transmitirlo en streaming), pero en puntos distintos del código.
 
@@ -711,6 +741,29 @@ growth limit 268435456
 - Ejecutar la prueba real de subida con un archivo de ~500-900 MB en una conexión de datos móviles típica, para confirmar que el edge de Railway no corta la conexión antes de completarse. **Esta es la única verificación que sigue sin hacerse** — todo lo demás (código, compilación, coordinación con backend) ya quedó confirmado.
 - Backend: publicar `lang/es` para que los mensajes de validación lleguen en español (hoy la app no depende de ese texto para nada crítico, pero sería una mejora de UX si en el futuro se decide mostrarlo).
 - Opcional/futuro: si se decide mostrar al inspector por qué una evidencia específica no se pudo sincronizar, agregar un campo `lastError` a `EvidenceEntity` (esto sí requeriría una migración de Room — planear junto con otras migraciones pendientes, no una por una).
+
+---
+
+#### Adenda a v1.7.6 (mismo día, mismo release): íconos de estado por Área + fix de lentitud al cargar el estado semanal
+
+Este cambio se compactó dentro de v1.7.6 en vez de abrir una versión nueva porque es una extensión directa del mismo flujo de estado semanal (`weeklyElementStatuses`) que ya se tocaba en esta versión, sin cambios de esquema ni de API.
+
+**Contexto:** el formulario de nuevo reporte (`ReportFormScreen.kt`) ya marcaba con ✅ verde y badge naranja "P" los activos, componentes y diagnósticos (ver sección 10). Faltaba ese mismo indicador un nivel más arriba, en el picker de **Área**, para que el inspector vea de un vistazo qué áreas ya están completas, cuáles tienen avance parcial y cuáles no tienen ningún registro esta semana.
+
+**Cambio 1 — Íconos de estado en el picker de Área (`ReportFormScreen.kt`):**
+- Se agregaron `elementIdsByArea`, `elementIdsWithExpectation`, `completedAreaIds` y `localPendingAreaIds` (calculados 100% en cliente a partir de `weeklyElementStatuses` y `localPendingDiagnosticItems`, que ya se descargaban para todas las áreas del grupo — no hizo falta ningún endpoint nuevo).
+- **Verde (✅):** el área tiene *todos* sus activos con expectativa esta semana confirmados `DONE` por el servidor.
+- **Badge "P" naranja:** el área tiene *al menos un* activo con avance (confirmado por servidor o guardado local pendiente de sync) pero no todos. Esto reutiliza deliberadamente el mismo badge "P" que ya significaba "pendiente por sincronizar" a nivel activo/componente/diagnóstico — a nivel Área su alcance es un poco más amplio (cubre tanto "área parcialmente revisada" como "área completa pero sin subir"), decisión tomada con el usuario para no introducir un tercer ícono nuevo.
+- **Sin ícono:** ningún activo del área tiene registro esta semana.
+- Se extendió `ProgressiveDropdownField` para aceptar `completedIds`/`pendingSyncIds` opcionales (default vacío), sin afectar el picker de "Tipo de activo" que reutiliza el mismo composable.
+
+**Cambio 2 — Fix de lentitud (~2s) al pintar los íconos (`DashboardViewModel.kt`):**
+- **Causa raíz:** `loadWeeklyElementsStatusForElements()` refrescaba el estado semanal desde el servidor de forma **secuencial**, una llamada HTTP por cada combinación (área, tipo de activo) — con 8 áreas eso son hasta 8 requests uno detrás del otro antes de que la UI mostrara cualquier ícono.
+- **Fix:** se aplicó el mismo patrón *local-first* que ya usa `RemoteCatalogViewModel` para el catálogo — se pinta primero lo que ya haya en caché de Room (instantáneo), y las llamadas de refresco al servidor ahora corren en **paralelo** (`coroutineScope` + `async`/`awaitAll()`) en vez de en secuencia, así el tiempo total pasa de "suma de N requests" a "el más lento de los N". Verificado por el usuario en dispositivo real tras el cambio: la carga se sintió notablemente más rápida.
+
+**Verificación de compilación:** se corrió `gradlew compileDebugKotlin --rerun-tasks` dos veces (una por cada cambio) sobre el JDK embebido de Android Studio. `BUILD SUCCESSFUL` ambas veces, sin errores ni warnings nuevos en `ReportFormScreen.kt` ni `DashboardViewModel.kt`.
+
+**Pendiente:** no se probó en emulador/dispositivo desde este entorno de desarrollo (WSL sin GUI); la verificación visual del picker de Área y de la mejora de velocidad la hizo el usuario en su propio dispositivo.
 
 ---
 

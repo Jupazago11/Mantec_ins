@@ -7,6 +7,9 @@ import com.example.mantec_ins.data.repository.InspectionLocalRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import com.example.mantec_ins.data.repository.WeeklyElementStatusRepository
 import java.text.SimpleDateFormat
 import com.example.mantec_ins.data.repository.PendingDiagnosticsRepository
@@ -157,44 +160,108 @@ class DashboardViewModel(
                     .map { it.areaId to it.elementTypeId }
                     .distinct()
 
-                if (tryServerRefresh) {
-                    pairs.forEach { (areaId, elementTypeId) ->
-                        weeklyElementStatusRepository.refreshFromServer(
+                val allowedElementIds = elements.map { it.id }.toSet()
+
+                suspend fun emitFromCache() {
+                    val allCachedItems = pairs.flatMap { (areaId, elementTypeId) ->
+                        weeklyElementStatusRepository.getCachedStatus(
                             areaId = areaId,
                             elementTypeId = elementTypeId
                         )
                     }
-                }
 
-                val allCachedItems = pairs.flatMap { (areaId, elementTypeId) ->
-                    weeklyElementStatusRepository.getCachedStatus(
-                        areaId = areaId,
-                        elementTypeId = elementTypeId
+                    val items = allCachedItems
+                        .filter { it.elementId in allowedElementIds }
+                        .distinctBy { it.elementId }
+                        .map {
+                            WeeklyElementStatusItemUi(
+                                areaId = it.areaId,
+                                elementTypeId = it.elementTypeId,
+                                elementId = it.elementId,
+                                elementName = it.elementName,
+                                status = it.status,
+                                expectedCount = it.expectedCount,
+                                doneCount = it.doneCount
+                            )
+                        }
+
+                    _uiState.value = _uiState.value.copy(
+                        weeklyElementStatuses = items
                     )
                 }
 
-                val allowedElementIds = elements.map { it.id }.toSet()
+                // Local-first: pinta lo que ya haya en caché antes de esperar la red,
+                // para que los íconos de área/activo no tarden lo que tarden N requests.
+                emitFromCache()
 
-                val items = allCachedItems
-                    .filter { it.elementId in allowedElementIds }
-                    .distinctBy { it.elementId }
-                    .map {
-                        WeeklyElementStatusItemUi(
-                            areaId = it.areaId,
-                            elementTypeId = it.elementTypeId,
-                            elementId = it.elementId,
-                            elementName = it.elementName,
-                            status = it.status,
-                            expectedCount = it.expectedCount,
-                            doneCount = it.doneCount
-                        )
+                if (tryServerRefresh) {
+                    coroutineScope {
+                        pairs.map { (areaId, elementTypeId) ->
+                            async {
+                                weeklyElementStatusRepository.refreshFromServer(
+                                    areaId = areaId,
+                                    elementTypeId = elementTypeId
+                                )
+                            }
+                        }.awaitAll()
                     }
 
-                _uiState.value = _uiState.value.copy(
-                    weeklyElementStatuses = items
-                )
+                    emitFromCache()
+                }
             } catch (e: Exception) {
                 android.util.Log.e("DASHBOARD", "Error cargando estado semanal para ${elements.size} elementos", e)
+            }
+        }
+    }
+
+    fun checkCatalogCompleteness(
+        groupId: Long,
+        tryRepairIfIncomplete: suspend () -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                _uiState.value = _uiState.value.copy(
+                    catalogCompleteness = _uiState.value.catalogCompleteness.copy(
+                        status = CatalogCompletenessStatus.CHECKING
+                    )
+                )
+
+                var result = catalogRepository.auditCatalogCompleteness(groupId)
+
+                if (!result.isComplete) {
+                    android.util.Log.w(
+                        "CATALOG_COMPLETENESS",
+                        "Catálogo incompleto: ${result.gaps.size} componente(s) con huecos. Intentando reparar con el servidor."
+                    )
+
+                    try {
+                        tryRepairIfIncomplete()
+                        result = catalogRepository.auditCatalogCompleteness(groupId)
+                    } catch (e: Exception) {
+                        android.util.Log.w(
+                            "CATALOG_COMPLETENESS",
+                            "No se pudo reparar el catálogo (probablemente sin conexión).",
+                            e
+                        )
+                    }
+                }
+
+                _uiState.value = _uiState.value.copy(
+                    catalogCompleteness = CatalogCompletenessUi(
+                        status = if (result.isComplete) {
+                            CatalogCompletenessStatus.COMPLETE
+                        } else {
+                            CatalogCompletenessStatus.INCOMPLETE
+                        },
+                        gapCount = result.gaps.size
+                    )
+                )
+            } catch (e: Exception) {
+                android.util.Log.e("CATALOG_COMPLETENESS", "Error verificando completitud del catálogo", e)
+
+                _uiState.value = _uiState.value.copy(
+                    catalogCompleteness = CatalogCompletenessUi(status = CatalogCompletenessStatus.UNKNOWN)
+                )
             }
         }
     }

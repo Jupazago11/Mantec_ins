@@ -364,6 +364,32 @@ fun ReportFormScreen(
         }.toSet()
     }
 
+    val elementIdsByArea = remember(elements) {
+        elements.groupBy({ it.areaId }, { it.id })
+    }
+
+    val elementIdsWithExpectation = remember(weeklyElementStatuses) {
+        weeklyElementStatuses
+            .filter { it.expectedCount > 0 }
+            .map { it.elementId }
+            .toSet()
+    }
+
+    val completedAreaIds = remember(
+        elementIdsByArea,
+        elementIdsWithExpectation,
+        completedElementIds
+    ) {
+        elementIdsByArea.mapNotNull { (areaId, elementIds) ->
+            val relevant = elementIds.filter { it in elementIdsWithExpectation }
+
+            if (relevant.isNotEmpty() && relevant.all { it in completedElementIds }) {
+                areaId
+            } else {
+                null
+            }
+        }.toSet()
+    }
 
     val selectedConditionName =
         conditions.firstOrNull { it.id == inspectionUiState.selectedConditionId }
@@ -463,6 +489,7 @@ fun ReportFormScreen(
                     label = "Área",
                     value = selectedAreaName,
                     options = areaOptions,
+                    completedIds = completedAreaIds,
                     placeholder = "Seleccione un área",
                     visible = true,
                     enabled = areaOptions.isNotEmpty(),
@@ -1094,6 +1121,8 @@ private fun ProgressiveDropdownField(
     label: String,
     value: String,
     options: List<Pair<Long, String>>,
+    completedIds: Set<Long> = emptySet(),
+    pendingSyncIds: Set<Long> = emptySet(),
     placeholder: String,
     visible: Boolean,
     enabled: Boolean,
@@ -1151,7 +1180,9 @@ private fun ProgressiveDropdownField(
                     options = options.map { (id, text) ->
                         SelectOptionUi(
                             id = id,
-                            title = text
+                            title = text,
+                            isCompleted = id in completedIds,
+                            isPendingSync = id in pendingSyncIds && id !in completedIds
                         )
                     },
                     onDismiss = {

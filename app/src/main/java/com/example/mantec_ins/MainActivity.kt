@@ -682,6 +682,17 @@ class MainActivity : ComponentActivity() {
 
 
 
+                LaunchedEffect(currentScreen, profile.groupId) {
+                    if (currentScreen == AppScreen.Home && profile.roleKey == "inspector" && profile.groupId != null) {
+                        dashboardVM.checkCatalogCompleteness(
+                            groupId = profile.groupId!!,
+                            tryRepairIfIncomplete = {
+                                remoteCatalogRepository.syncOfflineCatalog()
+                            }
+                        )
+                    }
+                }
+
                 LaunchedEffect(inspectionState.saveSuccess) {
                     if (inspectionState.saveSuccess) {
                         if (profile.groupAutoSync) {
@@ -898,6 +909,7 @@ class MainActivity : ComponentActivity() {
                                 pendingSyncItems = pendingSyncItems,
                                 pendingMeasurementDraftCount = pendingMeasurementDraftCount,
                                 showMeasurementsButton = hasMeasurementAccess,
+                                catalogCompleteness = dashboardState.catalogCompleteness,
                                 syncSuccessMessage = homeSyncMessage,
                                 syncWarningMessage = homeSyncWarning,
                                 isManualSyncRunning = isManualSyncRunning,

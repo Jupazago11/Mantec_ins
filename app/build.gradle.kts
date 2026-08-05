@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.mantec_ins"
         minSdk = 24
         targetSdk = 35
-        versionCode = 8
-        versionName = "1.7.6"
+        versionCode = 9
+        versionName = "1.7.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -26,6 +26,14 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+    }
+
+    applicationVariants.all {
+        val variant = this
+        outputs.all {
+            val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
+            output.outputFileName = "Mantec_v${variant.versionName}_${variant.buildType.name}.apk"
         }
     }
 

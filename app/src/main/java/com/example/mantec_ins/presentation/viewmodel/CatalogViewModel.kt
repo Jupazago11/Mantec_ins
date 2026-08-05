@@ -95,19 +95,31 @@ class CatalogViewModel(
         componentId: Long
     ) {
         viewModelScope.launch {
+            // Local-first: el inspector puede estar sin señal (planta/campo), así que
+            // Condición se pinta primero desde Room (instantáneo) y el servidor solo
+            // refresca en segundo plano si hay conexión. Antes era al revés y cada tap
+            // en un Componente sin señal colgaba la UI hasta el connectTimeout (20s).
+            try {
+                _conditions.value = repository.getConditionsByComponent(componentId)
+            } catch (e: Exception) {
+                android.util.Log.e(
+                    "CATALOG_VM",
+                    "Error cargando condiciones locales para componentId=$componentId",
+                    e
+                )
+            }
+
             try {
                 _conditions.value = remoteCatalogRepository.getConditionsByElementAndComponent(
                     elementId = elementId,
                     componentId = componentId
                 )
             } catch (e: Exception) {
-                android.util.Log.e(
+                android.util.Log.w(
                     "CATALOG_VM",
-                    "Error cargando condiciones remotas para elementId=$elementId componentId=$componentId. Usando fallback local.",
+                    "No se pudo refrescar condiciones remotas para elementId=$elementId componentId=$componentId. Se mantiene el catálogo local.",
                     e
                 )
-
-                _conditions.value = repository.getConditionsByComponent(componentId)
             }
         }
     }

@@ -105,4 +105,38 @@ class CatalogLocalRepository(
     suspend fun getConditionById(conditionId: Long): ConditionEntity? {
         return database.conditionDao().getById(conditionId)
     }
+
+    suspend fun auditCatalogCompleteness(groupId: Long): CatalogCompletenessResult {
+        val elements = database.elementDao().getByGroup(groupId)
+        val gaps = mutableListOf<CatalogComponentGap>()
+        val checkedComponentIds = mutableSetOf<Long>()
+
+        for (element in elements) {
+            val components = getComponentsByElement(element.id)
+
+            for (component in components) {
+                if (!checkedComponentIds.add(component.id)) continue
+
+                val diagnostics = getDiagnosticsByComponent(component.id)
+                val conditions = getConditionsByComponent(component.id)
+
+                if (diagnostics.isEmpty() || conditions.isEmpty()) {
+                    gaps.add(
+                        CatalogComponentGap(
+                            componentId = component.id,
+                            componentName = component.name,
+                            elementName = element.name,
+                            missingDiagnostics = diagnostics.isEmpty(),
+                            missingConditions = conditions.isEmpty()
+                        )
+                    )
+                }
+            }
+        }
+
+        return CatalogCompletenessResult(
+            isComplete = gaps.isEmpty(),
+            gaps = gaps
+        )
+    }
 }
