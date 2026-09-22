@@ -40,6 +40,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -191,6 +192,7 @@ fun MeasurementThicknessScreen(
                     HorizontalDivider(color = BorderSoft)
 
                     ThicknessLinesSection(
+                        elementId = uiState.selectedElementId,
                         lines = uiState.lines,
                         onLineValueChange = onLineValueChange
                     )
@@ -498,6 +500,7 @@ private fun DraftStatusCard(
 
 @Composable
 private fun ThicknessLinesSection(
+    elementId: Long?,
     lines: List<MeasurementThicknessDraftLineEntity>,
     onLineValueChange: (coverNumber: Int, field: String, value: String) -> Unit
 ) {
@@ -512,10 +515,15 @@ private fun ThicknessLinesSection(
         )
 
         lines.sortedBy { it.coverNumber }.forEach { line ->
-            ThicknessLineCard(
-                line = line,
-                onLineValueChange = onLineValueChange
-            )
+            // Clave por activo+cubierta: fuerza a Compose a recrear (y no reciclar)
+            // los campos de texto al cambiar de activo, para que no arrastren
+            // valores tipeados en el activo anterior.
+            key(elementId, line.coverNumber) {
+                ThicknessLineCard(
+                    line = line,
+                    onLineValueChange = onLineValueChange
+                )
+            }
         }
     }
 }
@@ -645,7 +653,7 @@ private fun NumberField(
 ) {
     var text by rememberSaveable { mutableStateOf("") }
 
-    // Populate only on initial DB load (when field is still empty and a value arrives)
+
     LaunchedEffect(value) {
         if (text.isEmpty() && value != null) {
             text = if (value == value.toLong().toDouble()) value.toLong().toString()

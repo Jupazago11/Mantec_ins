@@ -148,6 +148,8 @@ class MeasurementThicknessViewModel(
             _uiState.value = _uiState.value.copy(
                 selectedElementId = element.id,
                 selectedElementName = element.name,
+                draft = null,
+                lines = emptyList(),
                 isLoading = true,
                 errorMessage = null,
                 message = null

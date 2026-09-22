@@ -35,6 +35,10 @@ import com.example.mantec_ins.data.local.SessionManager
 import com.example.mantec_ins.data.repository.AuthRepository
 import com.example.mantec_ins.data.repository.CatalogLocalRepository
 import com.example.mantec_ins.data.repository.InspectionLocalRepository
+import com.example.mantec_ins.data.repository.PersonalActivityLocalRepository
+import com.example.mantec_ins.data.repository.PersonalActivityRepository
+import com.example.mantec_ins.data.repository.SupervisorSyncRepository
+import com.example.mantec_ins.sync.SupervisorSyncWorkManager
 import com.example.mantec_ins.data.repository.RemoteCatalogRepository
 import com.example.mantec_ins.data.repository.SyncRepository
 import com.example.mantec_ins.data.remote.RetrofitClient
@@ -43,7 +47,10 @@ import com.example.mantec_ins.presentation.ui.HomeScreen
 import com.example.mantec_ins.presentation.ui.LoginScreen
 import com.example.mantec_ins.presentation.ui.MainScreenHost
 import com.example.mantec_ins.presentation.ui.MeasurementThicknessScreen
+import com.example.mantec_ins.presentation.ui.SupervisorHomeScreen
 import com.example.mantec_ins.presentation.ui.UnsupportedRoleScreen
+import com.example.mantec_ins.presentation.viewmodel.SupervisorActivityViewModel
+import com.example.mantec_ins.presentation.viewmodel.SupervisorActivityViewModelFactory
 import com.example.mantec_ins.presentation.viewmodel.AppNavigationViewModel
 import com.example.mantec_ins.presentation.viewmodel.CatalogViewModel
 import com.example.mantec_ins.presentation.viewmodel.CatalogViewModelFactory
@@ -93,6 +100,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var syncRepositoryRef: SyncRepository
     private lateinit var reportVMRef: ReportListViewModel
     private lateinit var dashboardVMRef: DashboardViewModel
+    private lateinit var supervisorSyncRepositoryRef: SupervisorSyncRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -115,9 +123,31 @@ class MainActivity : ComponentActivity() {
 
         val sessionManager = SessionManager(this)
 
+        // Login unico Inspector/Supervisor (ver LOGIN_Y_ROLES.md): un
+        // solo endpoint de login, personalApi solo se usa para el logout
+        // remoto de una sesion de Supervisor.
         val authRepository = AuthRepository(
             apiService = RetrofitClient.createAuthApiService(this),
+            personalApi = RetrofitClient.createPersonalApiService(this),
             sessionManager = sessionManager
+        )
+
+        val personalActivityRepository = PersonalActivityRepository(
+            api = RetrofitClient.createPersonalApiService(this)
+        )
+
+        // Offline Supervisor (ver OFFLINE_SUPERVISOR.md): local-first, la
+        // UI lee de Room via este repo; el sync real contra el servidor
+        // lo hace SupervisorSyncRepository aparte (mismo patron que
+        // InspectionLocalRepository/SyncRepository del Inspector).
+        val personalActivityLocalRepository = PersonalActivityLocalRepository(
+            context = this,
+            database = db
+        )
+
+        val supervisorSyncRepository = SupervisorSyncRepository(
+            db = db,
+            api = RetrofitClient.createPersonalApiService(this)
         )
 
         val remoteCatalogRepository = RemoteCatalogRepository(
@@ -156,6 +186,15 @@ class MainActivity : ComponentActivity() {
                 remoteCatalogRepository = remoteCatalogRepository
             )
         )[LoginViewModel::class.java]
+
+        val supervisorActivityVM = ViewModelProvider(
+            this,
+            SupervisorActivityViewModelFactory(
+                localRepository = personalActivityLocalRepository,
+                syncRepository = supervisorSyncRepository,
+                remoteRepository = personalActivityRepository
+            )
+        )[SupervisorActivityViewModel::class.java]
 
         val inspectionVM = ViewModelProvider(
             this,
@@ -211,6 +250,7 @@ class MainActivity : ComponentActivity() {
         syncRepositoryRef = syncRepository
         reportVMRef = reportVM
         dashboardVMRef = dashboardVM
+        supervisorSyncRepositoryRef = supervisorSyncRepository
 
         val seedCompleted = mutableStateOf(false)
 
@@ -235,6 +275,28 @@ class MainActivity : ComponentActivity() {
             lifecycleScope.launch {
                 try {
                     val session = savedSession
+
+                    if (session.roleKey == "supervisor") {
+                        profileVM.setProfile(
+                            userId = session.userId,
+                            userName = session.userName,
+                            username = session.username,
+                            roleKey = session.roleKey,
+                            clientId = session.clientId ?: 0L,
+                            clientName = session.clientName ?: "",
+                            groupId = null,
+                            groupName = "",
+                            groupDescription = null,
+                            groupAutoSync = false,
+                            specialtyId = null,
+                            specialtyName = "",
+                            availableElementTypes = emptyList()
+                        )
+
+                        SupervisorSyncWorkManager.start(this@MainActivity)
+                        navigationVM.goToSupervisorHome()
+                        return@launch
+                    }
 
                     if (session.roleKey != "inspector") {
                         profileVM.setProfile(
@@ -444,6 +506,7 @@ class MainActivity : ComponentActivity() {
 
                 val inspectionState by inspectionVM.uiState.collectAsState()
                 val loginState by loginVM.uiState.collectAsState()
+                val supervisorHomeState by supervisorActivityVM.uiState.collectAsState()
                 val reports by reportVM.reports.collectAsState()
                 val pendingSyncItems by reportVM.pendingSyncItems.collectAsState()
                 val localPendingDiagnosticItems by reportVM.localPendingDiagnosticItems.collectAsState()
@@ -682,6 +745,18 @@ class MainActivity : ComponentActivity() {
 
 
 
+                // Mismo punto de disparo que el Inspector (LaunchedEffect de
+                // arriba, keyeado en currentScreen): entrar a la pantalla de
+                // Supervisor sincroniza sola si hay red, sin depender del
+                // boton manual ni de esperar el tick de WorkManager (hasta
+                // 15 min). sincronizar() ya es no-op seguro sin conexion y
+                // no hace nada si ya hay un sync en curso.
+                LaunchedEffect(currentScreen) {
+                    if (currentScreen == AppScreen.SupervisorHome) {
+                        supervisorActivityVM.sincronizar()
+                    }
+                }
+
                 LaunchedEffect(currentScreen, profile.groupId) {
                     if (currentScreen == AppScreen.Home && profile.roleKey == "inspector" && profile.groupId != null) {
                         dashboardVM.checkCatalogCompleteness(
@@ -802,65 +877,93 @@ class MainActivity : ComponentActivity() {
                             var username by remember { mutableStateOf("") }
                             var password by remember { mutableStateOf("") }
 
+                            // Login unico (ver LOGIN_Y_ROLES.md): una sola
+                            // llamada a loginVM.login(), el backend resuelve
+                            // si las credenciales son de un User (Inspector)
+                            // o un Employee (Supervisor). Misma bifurcacion
+                            // de 3 caminos que ya usa onCreate() para
+                            // restaurar sesion en frio.
                             LaunchedEffect(loginState.loginSuccess) {
                                 if (loginState.loginSuccess) {
                                     authRepository.getSavedSession()?.let { session ->
-                                        if (session.roleKey != "inspector") {
-                                            profileVM.setProfile(
-                                                userId = session.userId,
-                                                userName = session.userName,
-                                                username = session.username,
-                                                roleKey = session.roleKey,
-                                                clientId = session.clientId ?: 0L,
-                                                clientName = session.clientName ?: "",
-                                                groupId = null,
-                                                groupName = "",
-                                                groupDescription = null,
-                                                groupAutoSync = false,
-                                                specialtyId = null,
-                                                specialtyName = "",
-                                                availableElementTypes = emptyList()
-                                            )
+                                        when (session.roleKey) {
+                                            "supervisor" -> {
+                                                profileVM.setProfile(
+                                                    userId = session.userId,
+                                                    userName = session.userName,
+                                                    username = session.username,
+                                                    roleKey = session.roleKey,
+                                                    clientId = session.clientId ?: 0L,
+                                                    clientName = session.clientName ?: "",
+                                                    groupId = null,
+                                                    groupName = "",
+                                                    groupDescription = null,
+                                                    groupAutoSync = false,
+                                                    specialtyId = null,
+                                                    specialtyName = "",
+                                                    availableElementTypes = emptyList()
+                                                )
+                                                SupervisorSyncWorkManager.start(this@MainActivity)
+                                                navigationVM.goToSupervisorHome()
+                                            }
 
-                                            selectedAreaId = null
-                                            catalogVM.clearAllSelections()
-                                            inspectionVM.clearSelectionsFromAreaChange()
+                                            "inspector" -> {
+                                                if (session.clientId != null) {
+                                                    val elementTypes = catalogRepository.getElementTypesByClient(session.clientId)
+                                                    val group = catalogRepository.getAssignedGroup()
+                                                    val singleType = if (elementTypes.size == 1) elementTypes.first() else null
 
-                                            navigationVM.goToUnsupportedRole()
-                                            return@let
-                                        }
+                                                    profileVM.setProfile(
+                                                        userId = session.userId,
+                                                        userName = session.userName,
+                                                        username = session.username,
+                                                        roleKey = session.roleKey,
+                                                        clientId = session.clientId,
+                                                        clientName = session.clientName ?: "",
+                                                        groupId = group?.id,
+                                                        groupName = group?.name ?: "",
+                                                        groupDescription = group?.description,
+                                                        groupAutoSync = group?.autoSync ?: false,
+                                                        specialtyId = singleType?.id,
+                                                        specialtyName = singleType?.name ?: "",
+                                                        availableElementTypes = elementTypes
+                                                    )
 
-                                        if (session.clientId != null) {
-                                            val elementTypes = catalogRepository.getElementTypesByClient(session.clientId)
-                                            val group = catalogRepository.getAssignedGroup()
-                                            val singleType = if (elementTypes.size == 1) elementTypes.first() else null
+                                                    selectedAreaId = null
+                                                    catalogVM.clearAllSelections()
+                                                    inspectionVM.clearSelectionsFromAreaChange()
 
-                                            profileVM.setProfile(
-                                                userId = session.userId,
-                                                userName = session.userName,
-                                                username = session.username,
-                                                roleKey = session.roleKey,
-                                                clientId = session.clientId,
-                                                clientName = session.clientName ?: "",
-                                                groupId = group?.id,
-                                                groupName = group?.name ?: "",
-                                                groupDescription = group?.description,
-                                                groupAutoSync = group?.autoSync ?: false,
-                                                specialtyId = singleType?.id,
-                                                specialtyName = singleType?.name ?: "",
-                                                availableElementTypes = elementTypes
-                                            )
+                                                    navigationVM.goToHome()
+                                                }
+                                            }
 
-                                            selectedAreaId = null
-                                            catalogVM.clearAllSelections()
-                                            inspectionVM.clearSelectionsFromAreaChange()
+                                            else -> {
+                                                profileVM.setProfile(
+                                                    userId = session.userId,
+                                                    userName = session.userName,
+                                                    username = session.username,
+                                                    roleKey = session.roleKey,
+                                                    clientId = session.clientId ?: 0L,
+                                                    clientName = session.clientName ?: "",
+                                                    groupId = null,
+                                                    groupName = "",
+                                                    groupDescription = null,
+                                                    groupAutoSync = false,
+                                                    specialtyId = null,
+                                                    specialtyName = "",
+                                                    availableElementTypes = emptyList()
+                                                )
 
-                                            navigationVM.goToHome()
+                                                selectedAreaId = null
+                                                catalogVM.clearAllSelections()
+                                                inspectionVM.clearSelectionsFromAreaChange()
+
+                                                navigationVM.goToUnsupportedRole()
+                                            }
                                         }
                                     }
                                 }
                             }
-
 
                             LoginScreen(
                                 username = username,
@@ -869,9 +972,7 @@ class MainActivity : ComponentActivity() {
                                 errorMessage = loginState.errorMessage,
                                 onUsernameChange = { username = it },
                                 onPasswordChange = { password = it },
-                                onLoginClick = {
-                                    loginVM.login(username, password)
-                                }
+                                onLoginClick = { loginVM.login(username, password) }
                             )
                             if (loginState.isLoading) {
                                 AlertDialog(
@@ -986,7 +1087,7 @@ class MainActivity : ComponentActivity() {
                                     navigationVM.goToMeasurementThickness()
                                 },
                                 onLogout = {
-                                    authRepository.logout()
+                                    lifecycleScope.launch { authRepository.logout() }
                                     profileVM.clearProfile()
                                     selectedAreaId = null
                                     catalogVM.clearAllSelections()
@@ -1002,11 +1103,52 @@ class MainActivity : ComponentActivity() {
                                 userName = profile.userName,
                                 roleKey = profile.roleKey,
                                 onLogout = {
-                                    authRepository.logout()
+                                    lifecycleScope.launch { authRepository.logout() }
                                     profileVM.clearProfile()
                                     selectedAreaId = null
                                     catalogVM.clearAllSelections()
                                     inspectionVM.clearSelectionsFromAreaChange()
+                                    navigationVM.logout()
+                                }
+                            )
+                        }
+
+                        AppScreen.SupervisorHome -> {
+                            SupervisorHomeScreen(
+                                userName = profile.userName,
+                                isLoading = supervisorHomeState.isLoading,
+                                actividades = supervisorHomeState.actividades,
+                                actividadesHoy = supervisorHomeState.actividadesHoy,
+                                actividadesAyer = supervisorHomeState.actividadesAyer,
+                                diaSeleccionado = supervisorHomeState.diaSeleccionado,
+                                errorMessage = supervisorHomeState.errorMessage,
+                                guardando = supervisorHomeState.guardando,
+                                subiendoEvidenciaActivityId = supervisorHomeState.subiendoEvidenciaActivityId,
+                                sincronizando = supervisorHomeState.sincronizando,
+                                toastMessage = supervisorHomeState.toastMessage,
+                                onRefresh = { supervisorActivityVM.cargarActividades() },
+                                onSincronizar = { supervisorActivityVM.sincronizar() },
+                                onSeleccionarDia = { dia -> supervisorActivityVM.seleccionarDia(dia) },
+                                onGuardar = { activityId, comments, allWorked, personasHoras ->
+                                    supervisorActivityVM.guardarRegistro(activityId, comments, allWorked, personasHoras)
+                                },
+                                onGuardarComentarioPersona = { activityId, comments, allWorked, personasHoras, employeeId, comentario ->
+                                    supervisorActivityVM.guardarComentarioPersona(activityId, comments, allWorked, personasHoras, employeeId, comentario)
+                                },
+                                onSubirEvidencias = { activityId, uris ->
+                                    supervisorActivityVM.subirEvidencias(activityId, uris)
+                                },
+                                onBorrarEvidencia = { activityId, evidencia ->
+                                    supervisorActivityVM.borrarEvidencia(activityId, evidencia)
+                                },
+                                onAbrirEvidencia = { activityId, evidencia ->
+                                    supervisorActivityVM.obtenerUrlEvidencia(activityId, evidencia)
+                                },
+                                onClearToast = { supervisorActivityVM.clearToast() },
+                                onLogout = {
+                                    lifecycleScope.launch { authRepository.logout() }
+                                    SupervisorSyncWorkManager.stop(this@MainActivity)
+                                    profileVM.clearProfile()
                                     navigationVM.logout()
                                 }
                             )
@@ -1242,6 +1384,20 @@ class MainActivity : ComponentActivity() {
         super.onResume()
 
         val session = authRepositoryRef.getSavedSession() ?: return
+
+        if (session.roleKey == "supervisor") {
+            // Mismo criterio que el Inspector (patron 7 de
+            // PATRONES_ASINCRONISMO_OFFLINE.md): un refresh opcional en
+            // segundo plano nunca debe bloquear la UI ni fallar
+            // ruidosamente si no hay red — SupervisorSyncRepository.sync()
+            // ya maneja eso en silencio.
+            lifecycleScope.launch {
+                if (NetworkUtils.hasInternet(this@MainActivity)) {
+                    supervisorSyncRepositoryRef.sync()
+                }
+            }
+            return
+        }
 
         if (session.roleKey != "inspector") {
             return

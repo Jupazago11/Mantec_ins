@@ -29,7 +29,7 @@ class SyncWorker(
                 return Result.success()
             }
 
-            val api = RetrofitClient.createSyncApiService(applicationContext)
+            val api = RetrofitClient.createSyncApiService(applicationContext, background = true)
 
             val repository = SyncRepository(
                 context = applicationContext,
@@ -42,7 +42,7 @@ class SyncWorker(
             val measurementRepository = MeasurementThicknessRepository(
                 context = applicationContext,
                 database = db,
-                api = RetrofitClient.createMeasurementApiService(applicationContext)
+                api = RetrofitClient.createMeasurementApiService(applicationContext, background = true)
             )
 
             val syncedMeasurementDrafts = measurementRepository.syncAllPendingDrafts()

@@ -30,6 +30,10 @@ class AppNavigationViewModel : ViewModel() {
         _currentScreen.value = AppScreen.UnsupportedRole
     }
 
+    fun goToSupervisorHome() {
+        _currentScreen.value = AppScreen.SupervisorHome
+    }
+
     fun logout() {
         _currentScreen.value = AppScreen.Login
     }

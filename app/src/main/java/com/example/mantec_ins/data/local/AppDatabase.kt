@@ -23,10 +23,13 @@ import androidx.room.RoomDatabase
         ComponentConditionCrossRef::class,
         MeasurementThicknessDraftEntity::class,
         MeasurementThicknessDraftLineEntity::class,
-        MeasurementElementTypeAccessEntity::class
+        MeasurementElementTypeAccessEntity::class,
+        SupervisorActivityEntity::class,
+        SupervisorPersonaEntity::class,
+        SupervisorEvidenceEntity::class
     ],
-    version = 19,
-    exportSchema = false
+    version = 21,
+    exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun clientDao(): ClientDao
@@ -48,4 +51,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun componentConditionDao(): ComponentConditionDao
     abstract fun measurementThicknessDao(): MeasurementThicknessDao
     abstract fun measurementElementTypeAccessDao(): MeasurementElementTypeAccessDao
+    abstract fun supervisorActivityDao(): SupervisorActivityDao
+    abstract fun supervisorPersonaDao(): SupervisorPersonaDao
+    abstract fun supervisorEvidenceDao(): SupervisorEvidenceDao
 }

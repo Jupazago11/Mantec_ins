@@ -1,11 +1,11 @@
 # Documentación general del proyecto
 
 **Proyecto:** Mantec Inspector (Mantec_ins)
-**Versión actual:** 1.7.7 (versionCode 9)
+**Versión actual:** 1.9.0 (versionCode 26)
 **Lenguaje:** Kotlin 100%
 **Plataforma:** Android nativo
 **Fecha de análisis inicial:** Mayo 2026
-**Última actualización:** 2026-08-05 (ver v1.7.7 en la sección 16 para el detalle del cambio)
+**Última actualización:** 2026-09-21 (ver v1.9.0 en la sección 16 para el detalle del release)
 
 ---
 
@@ -655,6 +655,297 @@ Arquitectónicamente usa MVVM + Clean Architecture con Room, Retrofit y WorkMana
 ---
 
 ## 16. Historial de versiones
+
+### v1.9.0 (release, versionCode 26) — Primer APK de release instalable, apuntando a producción
+
+**Fecha:** 2026-09-21
+
+> **Nota sobre el número de versión**: esta entrada se llamó primero solo "v1.9" (`versionName = "1.9"`); el 2026-09-21 se estandarizó a `"1.9.0"` (versionCode sin cambios, sigue siendo 26) para que el `versionName` sea siempre de 3 partes. Esto **no es la misma versión** que la entrada más abajo "v1.9.0 — Offline-first para el rol Supervisor" (2026-09-20, versionCode 12) — esa fue una build intermedia de esta misma sesión de trabajo, nunca llegó a ser el release firmado; el historial se deja tal cual quedó escrito en su momento, sin reescribirlo. Esta entrada (versionCode 26) es la que corresponde al APK real que se entregó para instalar y probar.
+
+**Contexto:** el usuario pidió generar el APK de release (`BASE_URL = https://mantecsas.com/`) para instalarlo en un celular real y probar contra producción. Al correr `gradlew assembleRelease` por primera vez esta sesión, `apksigner verify` confirmó que el APK resultante **no estaba firmado** ("DOES NOT VERIFY", falta `META-INF/MANIFEST.MF") — el proyecto nunca tuvo un `signingConfig` para `release`, así que Android no permite instalarlo en ningún dispositivo, ni para pruebas.
+
+**Fix:** se agregó `signingConfig = signingConfigs.getByName("debug")` al bloque `release` — firma temporalmente con la keystore de debug (autogenerada por Android) solo para poder instalar y probar. **Esto no es apto para una publicación real** (Play Store u otra distribución fuera del equipo) — antes de eso hace falta una keystore de release propia, que este proyecto todavía no tiene.
+
+**Verificación de esta sesión:** `apksigner verify --print-certs` confirmó la firma tras el fix (`CN=Android Debug`). Se instaló el APK en un emulador limpio (arrancado desde cero para esta prueba) y abrió sin errores hasta la pantalla de login. No se completó un intento de login real contra producción por automatización de UI (el teclado en pantalla interfirió repetidamente con las coordenadas de los campos) — la garantía de que apunta a producción es directa por lectura de código: `BASE_URL` para `release` es una constante de compilación (`"https://mantecsas.com/"`), no hay ninguna lógica en tiempo de ejecución que pueda desviarla.
+
+**Archivos modificados:** `app/build.gradle.kts` (signingConfig de release, versionCode 26).
+
+**Pendiente:** keystore de release real antes de cualquier distribución fuera del equipo. Login real contra producción queda para cuando el usuario lo pruebe en su celular.
+
+---
+
+### v1.9.13 — Quitado el banner "Mostrando actividades de AYER"
+
+**Fecha:** 2026-09-21
+
+**Contexto:** el toggle Ayer/Hoy (naranja, con estilo segmentado) ya deja claro cuál día se está viendo — el banner ámbar adicional "Mostrando actividades de AYER (turno nocturno pendiente)" debajo era redundante. Se pidió quitarlo.
+
+**Fix:** eliminado el bloque `Surface`/`Text` que mostraba ese mensaje en `SupervisorHomeScreen.kt`. Al seleccionar "Ayer" ahora se va directo a la lista de actividades, sin mensaje intermedio.
+
+**Archivos modificados:** `presentation/ui/SupervisorHomeScreen.kt`, `app/build.gradle.kts` (versionCode 25, versionName 1.9.13).
+
+**Validación de esta sesión:** `gradlew assembleDebug`/`testDebugUnitTest` — `BUILD SUCCESSFUL`. Verificado visualmente en el emulador.
+
+---
+
+### v1.9.12 — Fix: valores decimales invisibles en el stepper de horas
+
+**Fecha:** 2026-09-21
+
+**Contexto:** tras achicar el stepper en v1.9.11, un entero ("5", "6") se veía bien pero un decimal ("5.5") no se veía nada — solo un puntito suelto entre los íconos +/-. Causa raíz: `OutlinedTextField` trae un padding interno fijo (parte del spec de Material3, no configurable de forma simple) que con un ancho de 48dp le dejaba a "5.5" prácticamente cero espacio real para el texto — un solo dígito alcanzaba a asomar, tres caracteres no.
+
+**Fix:** `OutlinedTextField` → `BasicTextField` en `HorasStepper` — sin chrome ni padding propio, todo el ancho disponible (52dp) es para el texto. De paso se agregó `KeyboardOptions(keyboardType = KeyboardType.Decimal)` para que el teclado que aparece al tocar el campo ya muestre el punto decimal a mano, sin cambiar de teclado.
+
+**Archivos modificados:** `presentation/ui/SupervisorHomeScreen.kt`, `app/build.gradle.kts` (versionCode 24, versionName 1.9.12).
+
+**Validación de esta sesión:** `gradlew assembleDebug`/`testDebugUnitTest` — `BUILD SUCCESSFUL`. Reproducido el bug exacto en el emulador (tocar "+" hasta llegar a "5.5") y confirmado que ahora se ve completo.
+
+---
+
+### v1.9.11 — Stepper de horas: estilo más minimalista
+
+**Fecha:** 2026-09-21
+
+**Contexto:** el rediseño del stepper en v1.9.9 (círculos blancos + contenedor en pastilla con fondo suave) no le gustó al usuario — pidió algo más minimalista.
+
+**Fix:** `HorasStepper` perdió el contenedor (`background(SoftBackground, RoundedCornerShape(50))`) y los círculos blancos detrás de cada ícono (`background(CardBackground, CircleShape)`) — ahora es solo el ícono "−", el número (campo editable sin borde visible salvo al enfocar, igual que antes) y el ícono "+", uno al lado del otro sin ningún fondo ni contorno. Íconos más chicos (28dp de toque, 18dp visual) para acompañar el look más liviano.
+
+**Archivos modificados:** `presentation/ui/SupervisorHomeScreen.kt`, `app/build.gradle.kts` (versionCode 23, versionName 1.9.11).
+
+**Validación de esta sesión:** `gradlew assembleDebug`/`testDebugUnitTest` — `BUILD SUCCESSFUL`. Verificado visualmente en el emulador.
+
+---
+
+### v1.9.10 — Miniatura local inmediata de evidencia (antes solo se veía tras sincronizar)
+
+**Fecha:** 2026-09-21
+
+**Contexto:** el usuario notó que, al tomar una foto o video, la miniatura real se ve en los reportes de activos (Inspector) de inmediato, pero en Supervisor se quedaba en el ícono genérico hasta sincronizar. Causa raíz: la miniatura de v1.9.1 solo se pedía para evidencia ya `SYNCED` (URL firmada de R2) — una evidencia recién tomada, todavía `PENDING_SYNC`, nunca tenía de dónde sacar una miniatura. `ReportFormScreen.kt` (Inspector) no tiene este problema porque genera la miniatura desde el **archivo local** (`loadEvidenceThumbnail()`: `ImageDecoder`/`MediaStore.Images.Media.getBitmap` para fotos, `MediaMetadataRetriever.getFrameAtTime(0)` para el primer frame de un video), sin depender de que ya haya subido a ningún lado.
+
+**Fix:** se replicó ese mismo patrón para Supervisor. `SupervisorEvidenceUi` ganó el campo `localPath` (ya existía en la entidad de Room, solo no estaba expuesto a la UI). Nueva función `loadLocalEvidenceThumbnail(path, fileType)` en `SupervisorHomeScreen.kt` — mismo patrón que `loadEvidenceThumbnail()` del Inspector, adaptado a un path de archivo plano en vez de una `content://` Uri (porque `encolarEvidenciaDesdeUri()` ya copia la evidencia a `filesDir` antes de guardarla, ver v1.9.0) — usa `BitmapFactory.decodeFile()` para fotos y `MediaMetadataRetriever.setDataSource(path)` para el frame de video. El tile de evidencia ahora prioriza la miniatura local (offline, instantánea); solo si ya no queda copia local (se subió y se borró, ver `SupervisorSyncRepository`) cae al comportamiento anterior de pedir la URL firmada — y solo para fotos, un video sincronizado sigue mostrando su ícono genérico (no se puede previsualizar un video por URL con `AsyncImage`).
+
+**Archivos modificados:** `presentation/viewmodel/SupervisorActivityViewModel.kt` (`SupervisorEvidenceUi.localPath`), `presentation/ui/SupervisorHomeScreen.kt`, `app/build.gradle.kts` (versionCode 22, versionName 1.9.10).
+
+**Validación de esta sesión:** `gradlew assembleDebug`/`testDebugUnitTest` — `BUILD SUCCESSFUL`. Verificado en el emulador: las dos evidencias tomadas en la ronda anterior (v1.9.9, una foto real + un video grabado) ahora muestran su miniatura real de inmediato en la grilla, con el punto ámbar de "pendiente de sincronizar" superpuesto — antes se veían como ícono genérico hasta sincronizar. Las evidencias antiguas ya sincronizadas (sin copia local, archivo borrado tras subir) siguen mostrando el ícono genérico como antes, comportamiento esperado.
+
+---
+
+### v1.9.9 — Stepper de horas rediseñado + botones de cámara (foto/video) iguales a los reportes de activos
+
+**Fecha:** 2026-09-21
+
+**Contexto:** dos mejoras pedidas sobre `SupervisorHomeScreen.kt`. (1) El stepper de horas por persona (+/-) se veía "muy simple" — 3 elementos sueltos (ícono, caja con borde, ícono) sin relación visual entre sí. (2) "Agregar foto o video" era un único botón que abría la galería del sistema — se pidió que use los mismos botones que ya existen en los reportes de activos (`ReportFormScreen.kt`/`EvidenceSection`): "Tomar foto", "Grabar video" y "Galería" por separado, con captura directa de cámara.
+
+**Fix 1 — stepper de horas:** nuevo `HorasStepper` — un contenedor en pastilla (`SoftBackground`, `RoundedCornerShape(50)`) con los botones +/- como círculos blancos flotando adentro (`CardBackground`, `CircleShape`, íconos más pequeños) y el campo de texto sin borde propio en el medio (`OutlinedTextFieldDefaults.colors` con bordes/contenedor transparentes salvo al enfocar, que se pone naranja) — mantiene la edición manual del valor, solo cambia el estilo.
+
+**Fix 2 — captura de foto/video:** se replicó el patrón exacto que ya usa el Inspector en sus reportes (`MainActivity.kt`: `ActivityResultContracts.TakePicture()`/`CaptureVideo()` sobre una `Uri` insertada en `MediaStore`, con el permiso de cámara pedido en el momento si hace falta) — pero ahora local a `ActividadCard` (no hoisted a `MainActivity`, ya que este módulo no sigue ese patrón para el picker de galería tampoco) y en su propia carpeta de `MediaStore` (`Pictures/ManTecSupervisor`/`Movies/ManTecSupervisor`) para no mezclar con la que ya usa el Inspector. La `Uri` resultante (de cámara o de galería) entra por el mismo `onSubirEvidencias()` de siempre — `encolarEvidenciaDesdeUri()` la copia a almacenamiento privado igual, sin importar el origen. Layout: "Tomar foto"/"Grabar video" como botones sólidos naranja lado a lado, "Galería" como botón de contorno naranja debajo (mismos colores que "Guardar registro" y "Galería" del Inspector).
+
+**Archivos modificados:** `presentation/ui/SupervisorHomeScreen.kt`, `app/build.gradle.kts` (versionCode 21, versionName 1.9.9).
+
+**Validación de esta sesión:** `gradlew assembleDebug`/`testDebugUnitTest` — `BUILD SUCCESSFUL`. Verificado en el emulador de punta a punta, no solo visualmente: se tomó una foto real con la cámara virtual del AVD (`adb shell uiautomator dump` para ubicar los botones exactos del flujo nativo de cámara — "Tomar foto" → captura → "Done"), se confirmó el toast "Evidencia guardada, se subirá cuando haya conexión." y una tercera miniatura con ícono de imagen (distinto de los íconos de video ya existentes) y punto ámbar de pendiente-de-sincronizar, igual que cualquier evidencia de galería. No se probó "Grabar video" de punta a punta en esta sesión (mismo contrato de Android que "Tomar foto", ya verificado funcionando) — queda como confirmación pendiente si se quiere.
+
+---
+
+### v1.9.8 — Visor de evidencia en modal (sin navegador) + fix de borde en botones Sí/No
+
+**Fecha:** 2026-09-21
+
+**Contexto:** dos correcciones sobre `SupervisorHomeScreen.kt`. (1) Tocar una evidencia abría el navegador del sistema (`Intent.ACTION_VIEW`) para mostrar la foto/video — sacaba al usuario de la app innecesariamente; se pidió un visor en modal, dentro de la app, cerrable. (2) Los botones "Sí"/"No" de "¿Todos trabajaron las horas programadas?" mostraban un trazo oscuro alrededor cuando estaban seleccionados (naranja), a diferencia de "Guardar registro" (limpio, sin trazo) — inconsistencia visual detectada por el usuario en captura de pantalla.
+
+**Fix 1 — visor de evidencia:** nuevo `EvidenciaVisorDialog` (`Dialog` de Compose, `usePlatformDefaultWidth = false` para ocupar toda la pantalla) — fondo oscuro semitransparente, botón de cerrar (X) arriba a la derecha, se cierra tocando la X o fuera del contenido (`onDismissRequest`). Fotos con `AsyncImage` (Coil, ya usado para miniaturas desde v1.9.1); video con `VideoView` nativo de Android (vía `AndroidView`) con sus propios controles de reproducción (`MediaController`) — no se agregó ExoPlayer, `VideoView` alcanza para reproducir el video en modal sin dependencia nueva. El tap en una evidencia ahora guarda `EvidenciaVisorState(url, fileType, originalName)` en estado local en vez de lanzar un `Intent`.
+
+**Fix 2 — borde de Sí/No:** `OutlinedButton` de Compose dibuja su borde por defecto encima del `containerColor`, incluso cuando está relleno de naranja — a diferencia de un `Button` normal (como "Guardar registro"), que no tiene borde. Se agregó `border = null` explícito cuando el botón está seleccionado (y se mantiene el borde gris normal cuando no lo está).
+
+**Archivos modificados:** `presentation/ui/SupervisorHomeScreen.kt`, `app/build.gradle.kts` (versionCode 20, versionName 1.9.8).
+
+**Validación de esta sesión:** `gradlew assembleDebug`/`testDebugUnitTest` — `BUILD SUCCESSFUL`. Verificado en el emulador con capturas: botón "No" seleccionado ya sin trazo oscuro; visor de evidencia abre en modal (fondo oscuro, X arriba a la derecha), el video se reproduce en vivo desde R2 dentro del modal, y se cierra correctamente al tocar la X, volviendo a la pantalla normal.
+
+---
+
+### v1.9.7 — Título simplificado + toggle Ayer/Hoy con estilo segmentado
+
+**Fecha:** 2026-09-21
+
+**Contexto:** dos ajustes de UX pedidos sobre "Mis actividades de hoy" (rebautizada). (1) El título ya no debe decir "de hoy" porque ahora la pantalla puede mostrar el día de ayer también (desde el toggle de v1.9.3) — queda solo "Mis actividades". (2) El toggle Hoy/Ayer usaba dos `OutlinedButton` sueltos con espacio entre ellos (parecían dos botones independientes); se pidió el mismo look que ya usa el selector Inspector/Supervisor de `LoginScreen.kt` (`LoginModeButton`): un solo contenedor con fondo suave y esquinas redondeadas, con el segmento activo como una pastilla naranja adentro. También se invirtió el orden: "Ayer" a la izquierda, "Hoy" a la derecha (antes era al revés).
+
+**Cambio:** en `SupervisorHomeScreen.kt`, `DiaToggleButton` pasó de `OutlinedButton` a un `Surface` clickeable (mismo patrón exacto que `LoginModeButton`: `color = MantecOrange` si está seleccionado, `Color.Transparent` si no), envuelto en un `Row` con `.background(SoftBackground, RoundedCornerShape(14.dp)).padding(4.dp)` — el contenedor compartido que le da el look de segmented control. Título cambiado de "Mis actividades de hoy" a "Mis actividades".
+
+**Archivos modificados:** `presentation/ui/SupervisorHomeScreen.kt`, `app/build.gradle.kts` (versionCode 19, versionName 1.9.7).
+
+**Validación de esta sesión:** `gradlew assembleDebug` — `BUILD SUCCESSFUL`. Verificado visualmente en el emulador con captura de pantalla: título correcto, "Ayer" a la izquierda y "Hoy" a la derecha (seleccionado, pastilla naranja) dentro de un único contenedor — coincide con la referencia visual que se pidió replicar.
+
+---
+
+### v1.9.6 — Fix: Hoy/Ayer debe clasificarse en hora de Colombia, no la del dispositivo
+
+**Fecha:** 2026-09-21
+
+**Contexto:** el usuario recordó explícitamente "la hora es la de Colombia" justo después de que en la verificación visual de v1.9.5 se observara que el reloj del emulador de pruebas había cruzado medianoche — y al revisar ese detalle salió a la luz que el emulador corría con su reloj en **GMT**, no en hora de Colombia. Esto expuso un bug real, no solo un detalle de la prueba: `todayDateString()`/`yesterdayDateString()` (agregadas en v1.9.3 para el toggle Hoy/Ayer) usaban `Calendar.getInstance()`, basado en la zona horaria configurada en el **dispositivo**, no en Colombia. El backend Laravel, en cambio, fija `'timezone' => 'America/Bogota'` en `config/app.php` — todo "hoy"/"ayer" del lado servidor está calculado ahí, sin importar dónde corra el servidor. Si el teléfono de un supervisor estuviera mal configurado (o, como en este caso, un emulador de prueba en GMT), la clasificación Hoy/Ayer del cliente divergería de la del servidor durante las ~5 horas al día donde Bogotá (UTC-5) y la otra zona no coinciden en la fecha — siempre alrededor de la medianoche.
+
+**Fix:** `todayDateString()`/`yesterdayDateString()` ahora anclan explícitamente a `TimeZone.getTimeZone("America/Bogota")` tanto para el cálculo (`Calendar.getInstance(bogotaZone)`) como para el formato (`SimpleDateFormat.timeZone`), sin importar la zona horaria del dispositivo. Además, ambas funciones ganaron un parámetro opcional `nowMillis: Long = System.currentTimeMillis()` (no rompe ningún call site existente) específicamente para poder fijar un instante exacto en tests.
+
+**Tests nuevos:** `SupervisorActivityDateTest` (2 tests) — el caso central fija el instante `2026-09-21 02:00:00 UTC` (que es `2026-09-20 21:00:00` en Bogotá: ya "mañana" en UTC/GMT pero todavía "hoy" en Colombia) y confirma que `todayDateString()` devuelve `"2026-09-20"` — este test habría fallado con el código de antes del fix en cualquier máquina/CI configurada en UTC, exactamente el escenario que expuso el bug.
+
+**Archivos modificados:** `presentation/viewmodel/SupervisorActivityViewModel.kt`, `app/build.gradle.kts` (versionCode 18, versionName 1.9.6).
+
+**Archivos nuevos:** `app/src/test/java/.../presentation/viewmodel/SupervisorActivityDateTest.kt`.
+
+**Validación de esta sesión:** `gradlew testDebugUnitTest` — **19/19 tests pasando** (16 previos + 2 nuevos de zona horaria + el stub por defecto), confirmado leyendo los XML de resultado. `gradlew assembleDebug` — `BUILD SUCCESSFUL`.
+
+---
+
+### v1.9.5 — Refresco periódico de la URL firmada de evidencia
+
+**Fecha:** 2026-09-20/21
+
+**Contexto:** última limitación conocida de las 6 que quedaban pendientes para el módulo Supervisor (numeral 5): la miniatura real de evidencia (v1.9.1) pedía la URL firmada de R2 una sola vez al mostrar el tile; esa URL vence a los 10 minutos (`Api\Personal\ActivityEvidenceController::show()`), así que si la pantalla quedaba abierta más tiempo, la miniatura podía dejar de cargar sin que nada la refrescara. Los numerales 4 (prueba en dispositivo físico real / build de release) y 6 (commit del fix v1.7.8 de Mediciones) quedan a criterio del usuario, no son cambios de código.
+
+**Fix:** en `SupervisorHomeScreen.kt`, el `LaunchedEffect` que pide la URL de miniatura pasó de una sola petición a un bucle (`while (true) { ...; delay(8 min) }`) que se repite cada 8 minutos — por debajo del TTL real de 10 — mientras el tile de evidencia siga en pantalla. Se cancela solo cuando Compose saca el tile de composición (se cierra la actividad, se hace scroll fuera de la lista, etc.), sin necesidad de limpieza manual. Sigue siendo "best effort": si no hay red en ese ciclo, simplemente no se refresca esa vuelta y se reintenta en el próximo.
+
+**Archivos modificados:** `presentation/ui/SupervisorHomeScreen.kt`, `app/build.gradle.kts` (versionCode 17, versionName 1.9.5).
+
+**Validación de esta sesión:** `gradlew assembleDebug` — `BUILD SUCCESSFUL`. Reinstalado en el emulador y verificado que la app sigue abriendo, navegando y expandiendo tarjetas sin error tras el cambio (smoke test visual, no se esperó los 8 minutos para confirmar el segundo ciclo de refresco en esta sesión). De paso, este smoke test confirmó algo útil: el reloj real del emulador cruzó medianoche durante la sesión (pasó a 2026-09-21), y la clasificación Hoy/Ayer se ajustó sola correctamente (la actividad de "hoy" pasó a mostrarse bajo "Ayer", y el toggle desapareció porque ya solo quedaba un día con datos) — confirma en vivo, sin proponérselo, que la lógica de fecha real programada funciona en el cruce de día real, no solo en pruebas con fecha fija.
+
+**Pendiente:** de los 6 puntos originales para "100%", cierran 1, 2, 3 y 5 en esta sesión. Quedan 4 (prueba en dispositivo físico/release) y 6 (commit de v1.7.8) del lado del usuario.
+
+---
+
+### v1.9.4 — Prueba en modo avión, fix del logout global por 401 en background, y primeros tests automatizados
+
+**Fecha:** 2026-09-20
+
+**Contexto:** el usuario pidió cerrar 3 de los 6 puntos pendientes que quedaban para poder decir que el módulo Supervisor está "100%": (1) la prueba real en modo avión del flujo offline, nunca ejecutada; (2) el bug de "HTTP 401 Unauthorized" reportado semanas atrás y nunca root-causeado; (3) la ausencia total de pruebas automatizadas en el módulo.
+
+**1. Prueba en modo avión — ejecutada y verificada de punta a punta.** En el emulador: `adb shell svc wifi disable` (único transporte de red del AVD; `dumpsys connectivity` confirmó 0 redes activas), se abrió la app (lectura local-first sin error), se escribió un comentario de prueba y se guardó un registro, se agregaron 2 evidencias (una foto y un video) — todo mostró el toast correcto ("...guardado"/"...se subirá cuando haya conexión") y el badge ámbar "Sin sincronizar" en la actividad y en cada evidencia, sin ningún error visible. Se reactivó la red (`svc wifi enable`), se tocó el botón de sincronizar manual, y los badges de "sin sincronizar" desaparecieron. Se verificó directamente contra la base de datos Postgres del backend (no solo la UI) que los datos realmente llegaron: `comments = "PRUEBA_OFFLINE_20260920"`, `all_worked_scheduled_hours = true`, y las 2 evidencias con su path real en R2 bajo `personal-actividades/argos-1/2026/actividad-31/...`. Cierra el único punto que nunca se había probado del diseño offline original.
+
+**2. Bug de "HTTP 401 Unauthorized" — causa raíz encontrada y corregida.** Investigando `AuthInterceptor.kt` se encontró que **cualquier** respuesta 401 de **cualquier** llamada a la API (Inspector o Supervisor) dispara `TokenExpirationEvent.emit()`, que en `MainActivity.kt` fuerza un logout global inmediato (`authRepository.logout()` + navegación a Login) — sin distinguir si la llamada vino de una acción en primer plano (el usuario mirando la pantalla) o de un sync silencioso en segundo plano disparado por `SyncWorker`/`SupervisorSyncWorker` (WorkManager periódico, cada 15 min, puede correr con la pantalla apagada). Esto significa que un 401 transitorio durante un sync en background podía sacar al usuario a la pantalla de Login sin ningún aviso, en medio de lo que estuviera haciendo — encaja con el síntoma original reportado ("cree una actividad para hoy, y mira... necesitamos un botón de refresh?"). Nota honesta: no fue posible reproducir el 401 original exacto (el disparador más probable, ya cerrado estructuralmente en v1.8.0, era el `BASE_URL` hardcodeado que había que editar a mano para probar en local — un login contra un backend y una acción posterior contra otro habría producido justo este síntoma; con `BuildConfig.BASE_URL` por `buildType` ese escenario específico ya no puede repetirse). Independientemente de la causa original, el gap de arquitectura sí es real y se corrigió: `AuthInterceptor` ahora acepta `emitExpirationEvent: Boolean`, y `RetrofitClient.createSyncApiService()`/`createMeasurementApiService()`/`createPersonalApiService()` ganan un parámetro `background: Boolean = false` que lo desactiva. `SyncWorker.kt` y `SupervisorSyncWorker.kt` (ambos, mismo riesgo compartido) ahora piden sus servicios de API con `background = true` — un 401 en un sync silencioso ya no fuerza un logout global; solo lo sigue haciendo un 401 en una acción explícita en primer plano (login, guardar, sincronizar manual), donde sí es correcto avisarle al usuario de inmediato.
+
+**3. Primeros tests automatizados del proyecto.** El proyecto no tenía ningún test real (solo los stubs por defecto de Android Studio). Se agregó MockK + `kotlinx-coroutines-test` (`testImplementation`, sin tocar dependencias de producción) y se escribieron 16 tests JVM nuevos, enfocados en la lógica más crítica de esta sesión:
+- `SupervisorSyncRepositoryTest` (11 tests) — cubre la máquina de estados `PENDING_SYNC → SYNCED/ERROR` completa: push de registro exitoso/403/422/500/excepción de red, push de evidencia exitoso (incluye que borre el archivo local)/422/archivo-local-perdido, y el merge de refresh (actividad nueva se inserta `SYNCED`; una con registro `PENDING_SYNC` no se pisa; una ya sincronizada sí se actualiza). Se prueba a través de la API pública (`sync()`/`refreshDesdeServidor()`) verificando las llamadas a los DAOs con MockK, sin abrir visibilidad de métodos privados solo para testear.
+- `SupervisorHomeScreenUtilsTest` (5 tests) — cubre `formatHoras()`: enteros sin decimales, medios puntos, redondeo de ruido de punto flotante tras sumas repetidas de 0.5 (el caso real del stepper +/-), precisión arbitraria, valores negativos.
+- Se encontró y corrigió en el camino un gotcha estándar de Android: los unit tests JVM no tienen `android.util.Log` real y lanzaban `RuntimeException` en cualquier log — se agregó `testOptions { unitTests.isReturnDefaultValues = true }`, configuración de solo-test que no afecta producción.
+
+**Archivos nuevos:** `app/src/test/java/.../data/repository/SupervisorSyncRepositoryTest.kt`, `app/src/test/java/.../presentation/ui/SupervisorHomeScreenUtilsTest.kt`.
+
+**Archivos modificados:** `AuthInterceptor.kt`, `RetrofitClient.kt`, `sync/SyncWorker.kt`, `sync/SupervisorSyncWorker.kt`, `SupervisorHomeScreen.kt` (`formatHoras` de `private` a `internal` para poder testearla), `gradle/libs.versions.toml` + `app/build.gradle.kts` (MockK, coroutines-test, `testOptions`, versionCode 16, versionName 1.9.4).
+
+**Validación de esta sesión:** `gradlew testDebugUnitTest` — **16/16 tests pasando, 0 fallos** (confirmado leyendo los XML de resultado, no solo el resumen de consola). `gradlew assembleDebug` — `BUILD SUCCESSFUL`. Prueba en modo avión ejecutada en emulador real contra backend y Postgres reales (detalle arriba). El fix del 401 se probó por compilación y por revisión de código; **no se reprodujo un 401 real post-fix** porque no se pudo forzar uno de forma controlada en esta sesión — la corrección está BIEN fundamentada en el código leído, pero queda como una mejora de resiliencia verificada por análisis, no por reproducción directa del bug original.
+
+**Pendiente:** de los 6 puntos que quedaban para decir "100%", cierran 1, 2 y 3 en esta ronda. Siguen abiertos: (4) prueba en dispositivo físico real y en build de release — todo lo de hoy se probó solo en emulador AVD, en debug; (5) la URL firmada de evidencia sigue venciendo a los 10 min sin refresco automático si la pantalla queda abierta más tiempo; (6) el fix de v1.7.8 en Mediciones de Espesor sigue sin commitear.
+
+---
+
+### v1.9.3 — Toggle Hoy/Ayer para actividades nocturnas
+
+**Fecha:** 2026-09-20
+
+**Contexto:** feature pendiente desde antes de la ronda offline (pausada a pedido explícito del usuario: "Offline completo ya, antes de seguir con otras mejoras" — ver `API_SUPERVISOR.md` y `OFFLINE_SUPERVISOR.md` sección 12). El pedido original: mostrar un botón arriba para elegir entre actividades de "Ayer" y "Hoy"; si no hay de hoy, mostrar solo las de ayer y que sea evidente; si no hay de ayer, mostrar solo las de hoy. Precisión del usuario en esta ronda: "una nocturna cuenta con la fecha real de programada" — la clasificación Hoy/Ayer se hace comparando `actividad.date` (la fecha real programada de cada actividad, ya presente en el modelo) contra la fecha real de hoy/ayer del dispositivo, nunca infiriendo nada a partir del turno.
+
+**Cambio:** no hizo falta tocar el backend ni la sincronización — `GET api/personal/actividades` ya devuelve, en una sola respuesta, las actividades de hoy más cualquier turno Nocturno de ayer (`Api\Personal\ActivityController::index()`, ver `API_SUPERVISOR.md` sección 2), y esa unión ya se cachea completa en Room. Todo el trabajo fue de UI/estado:
+
+- `SupervisorActivityViewModel.kt`: nuevo enum `DiaActividad` (`HOY`/`AYER`). `SupervisorHomeUiState` gana `actividadesHoy`, `actividadesAyer` (ambas derivadas de `actividades` comparando el campo `date` de cada una contra la fecha real de hoy/ayer calculada con `Calendar`/`SimpleDateFormat`, mismo formato `yyyy-MM-dd` que usa el backend) y `diaSeleccionado`. `recargarDesdeRoom()` recalcula ambas listas en cada refresh y decide el día por defecto: mantiene la selección actual si todavía tiene datos, si no cae al otro día que sí tenga, y si ninguno tiene, por defecto `HOY`. Nuevo método `seleccionarDia()` para el toggle manual.
+- `SupervisorHomeScreen.kt`: nuevo `DiaToggleButton` (mismo criterio visual que el "Sí/No" de horas — relleno naranja si seleccionado, contorno si no), en una fila debajo del encabezado que **solo aparece si hay actividades en ambos días**. Cuando `diaSeleccionado == AYER`, un banner ámbar fijo dice "Mostrando actividades de AYER (turno nocturno pendiente)" — visible incluso cuando no hay toggle porque hoy no tenía actividades, para que nunca sea ambiguo qué día se está viendo.
+- `MainActivity.kt`: pasa los 3 campos nuevos de `uiState` y el callback `onSeleccionarDia` a `SupervisorHomeScreen`.
+
+**Bug encontrado y corregido durante la verificación visual en emulador** (no solo compilado — probado de verdad): el primer intento anidó por error la fila del toggle dentro del mismo `Surface` que el encabezado sin un `Column` contenedor, y como el slot de contenido de `Surface` apila a los hijos como un `Box` en vez de uno debajo del otro, el toggle quedó dibujado *encima* del encabezado (título y botones de sincronizar/salir superpuestos e ilegibles). Se corrigió envolviendo encabezado + toggle en un `Column` dentro del `Surface`. Se aprovechó la misma sesión de prueba para corregir otro problema menor de la ronda anterior (v1.9.1): la miniatura real de evidencia dejaba el tile en blanco mientras la imagen cargaba o si fallaba la carga (el ícono genérico y la miniatura eran mutuamente excluyentes); ahora el ícono se pinta siempre como fondo y la miniatura se superpone encima solo si termina de cargar, así nunca se ve un tile vacío.
+
+**Archivos modificados:** `presentation/viewmodel/SupervisorActivityViewModel.kt`, `presentation/ui/SupervisorHomeScreen.kt`, `MainActivity.kt`, `app/build.gradle.kts` (versionCode 15, versionName 1.9.3).
+
+**Validación de esta sesión:** `gradlew assembleDebug` — `BUILD SUCCESSFUL`. **Probado en el emulador contra datos reales** (backend local + R2 real, empleado de prueba `lfdo` con una actividad de hoy Diurno y una actividad Nocturno fechada ayer): capturas de pantalla confirmaron el toggle cambiando de apariencia, el banner de "ayer" apareciendo, el filtrado correcto por día, las miniaturas reales de evidencia cargando desde R2, y el stepper de horas mostrando "12" / "12.5" correctamente. Encontrado y corregido en el momento un bug de layout real (ver arriba) que no se habría detectado solo compilando.
+
+**Pendiente:** con esto, el toggle Hoy/Ayer queda resuelto — ya no está en la lista de pendientes. Sigue abierto el bug de "HTTP 401 Unauthorized" (pausado, causa raíz del lado cliente aún sin identificar) y la prueba manual en modo avión del flujo offline completo.
+
+---
+
+### v1.9.2 — Acordeón: solo una actividad expandida a la vez
+
+**Fecha:** 2026-09-20
+
+**Contexto:** en "Mis actividades de hoy", cada tarjeta manejaba su propio estado de expandido/contraído de forma independiente — se podían tener varias actividades abiertas a la vez, lo que confundía sobre en cuál se estaba editando el registro (comentarios/horas/evidencia). Pedido explícito: al abrir una actividad, cualquier otra que estuviera abierta debe contraerse sola.
+
+**Cambio:** el estado de "cuál actividad está expandida" se subió de `ActividadCard` (estado local `var abierta by remember { ... }`) a `SupervisorHomeScreen` (`var actividadExpandidaId by remember { mutableStateOf<Long?>(null) }`, un solo id o `null`). Cada tarjeta ahora recibe `abierta: Boolean` y `onToggleAbierta: () -> Unit` desde el padre; el toggle en el padre simplemente asigna `actividadExpandidaId` al id tocado (o `null` si ya era ese mismo, para poder volver a cerrarla) — como solo hay una variable de estado para las N tarjetas, abrir una dejando `actividadExpandidaId` distinto del id de cualquier otra automáticamente las contrae a todas.
+
+**Archivos modificados:** `presentation/ui/SupervisorHomeScreen.kt` (`app/build.gradle.kts` versionCode 14, versionName 1.9.2).
+
+**Validación de esta sesión:** `gradlew assembleDebug` — `BUILD SUCCESSFUL`. No probado todavía manualmente en emulador/dispositivo.
+
+---
+
+### v1.9.1 — Miniaturas reales de evidencia + stepper de horas por 0.5
+
+**Fecha:** 2026-09-20
+
+**Contexto:** dos mejoras de UX pedidas sobre la pantalla "Mis actividades de hoy" (`SupervisorHomeScreen.kt`) del rol Supervisor.
+
+1. **Miniatura real de evidencia**: la grilla de evidencias mostraba solo un ícono genérico de imagen/video (ver pendiente ya señalado en `API_SUPERVISOR.md` sección 7). Ahora, para evidencia de tipo foto que ya está `SYNCED` (tiene `serverId`) y solo si el dispositivo tiene conexión (`NetworkUtils.hasInternet`), se pide la URL firmada de R2 (misma que ya se usaba para abrir la evidencia al tocarla) y se muestra como miniatura real con Coil (`AsyncImage`). Es deliberadamente "best effort": si no hay red, si la evidencia todavía no se sincronizó, o si la carga falla, se mantiene el ícono genérico de siempre — no bloquea ni rompe nada. Video sigue mostrando siempre su ícono. Se agregó `io.coil-kt:coil-compose:2.7.0` como dependencia nueva (antes el proyecto no tenía ninguna librería de carga de imágenes).
+   - Limitación conocida, no resuelta en esta ronda: la URL firmada vence a los 10 minutos (ver `API_SUPERVISOR.md` sección 2); si la pantalla queda abierta más tiempo, esa miniatura puntual podría dejar de cargar hasta la próxima recomposición de esa fila. No se implementó refresco periódico de la URL por ser un caso extremo de bajo impacto.
+2. **Stepper de horas por persona**: el campo de horas trabajadas por persona ganó dos botones (+/-) que suman/restan 0.5 horas, además de seguir siendo editable a mano. El valor se formatea con una función nueva `formatHoras()`: si es un número entero se muestra sin decimales ("12" en vez de "12.0"); si no, se muestra con su parte decimal ("12.5"). Se redondea a 2 decimales en cada paso para no arrastrar ruido de punto flotante tras varios +/- seguidos.
+
+**Archivos modificados:** `presentation/ui/SupervisorHomeScreen.kt` (ambas mejoras), `gradle/libs.versions.toml` y `app/build.gradle.kts` (dependencia de Coil), `app/build.gradle.kts` (versionCode 13, versionName 1.9.1). `API_SUPERVISOR.md` actualizado para marcar el pendiente de miniaturas como resuelto.
+
+**Validación de esta sesión:** `gradlew assembleDebug` — `BUILD SUCCESSFUL`, sin errores (solo warnings preexistentes no relacionados: íconos deprecados en otras pantallas, falta de índice en dos junction entities ya existentes). No se probó todavía manualmente en emulador/dispositivo — queda pendiente confirmar visualmente la miniatura real contra R2 real y el comportamiento del stepper en pantalla.
+
+---
+
+### v1.9.0 — Offline-first para el rol Supervisor
+
+**Fecha:** 2026-09-20
+
+**Contexto:** ver `OFFLINE_SUPERVISOR.md` (documento de diseño completo). El módulo Supervisor de v1.8.0 era 100% online; el usuario pidió construir el soporte offline completo antes de seguir con otras mejoras. Se replicó tal cual el patrón `PENDING_SYNC → SYNCED` (+ `ERROR`) que ya usa el Inspector, documentado en `PATRONES_ASINCRONISMO_OFFLINE.md`, en vez de inventar uno nuevo.
+
+**Archivos nuevos:** `data/local/SupervisorActivityEntity.kt`, `SupervisorPersonaEntity.kt`, `SupervisorEvidenceEntity.kt`, `SupervisorActivityDao.kt`, `SupervisorPersonaDao.kt`, `SupervisorEvidenceDao.kt`, `SupervisorMigrations.kt`, `data/repository/SupervisorSyncRepository.kt`, `sync/SupervisorSyncWorker.kt`, `sync/SupervisorSyncWorkManager.kt`.
+
+**Archivos modificados:** `AppDatabase.kt` (entidades nuevas, `version = 20`, `exportSchema = true`), `DatabaseProvider.kt` (`MIGRATION_19_20`), `PersonalActivityLocalRepository.kt` (rewrite — ahora Room-only, copia evidencia a almacenamiento privado antes de encolarla), `PersonalActivityRepository.kt` (recortado a solo acciones online: URL firmada y borrado remoto), `PersonalApiService.kt` (`saveActividad`/`uploadEvidencias` devuelven `Response<T>` para poder distinguir por código HTTP), `SupervisorActivityViewModel.kt` (+ Factory, rewrite completo), `SupervisorHomeScreen.kt` (badges de estado de sincronización), `MainActivity.kt` (instancias nuevas + mismos puntos de disparo de sync que el Inspector, rama paralela por `roleKey == "supervisor"`), `app/build.gradle.kts` (`ksp room.schemaLocation`; versionCode 12, versionName 1.9.0).
+
+**Validación de esta sesión:** `gradlew assembleDebug` — `BUILD SUCCESSFUL`. La migración `19 → 20` se verificó contra un dispositivo real con datos preexistentes del Inspector (no solo revisada en código): se extrajo la base de datos real de un emulador (`PRAGMA user_version` 19, `integrity_check` ok, 7 reports/7 report_details/10 measurement_thickness_drafts/53 elements/171 cross-refs), se instaló el APK actualizado **sobre** la instalación existente, se abrió la app sin crash ni excepción de migración, y se volvió a extraer la base de datos: `user_version` 20, `integrity_check` ok, las 3 tablas `supervisor_*` nuevas presentes, y **los mismos conteos exactos** en todas las tablas preexistentes del Inspector — confirmando que la migración no destruye datos reales. Detalle completo, incluyendo una nota de tooling sobre corrupción de datos binarios al extraer la DB vía PowerShell (resuelto usando Git Bash), en `OFFLINE_SUPERVISOR.md` sección 2.
+
+**Pendiente:** prueba manual en modo avión (guardar + subir evidencia sin conexión, confirmar reconexión y sync) — no ejecutada en esta sesión, ver `OFFLINE_SUPERVISOR.md` sección 12. El toggle Hoy/Ayer y el bug de "HTTP 401 Unauthorized" siguen pausados, a pedido explícito del usuario, para la siguiente ronda.
+
+---
+
+### v1.8.0 — Rol nuevo "Supervisor": login Employee + actividades + evidencia a R2
+
+**Fecha:** 2026-09-20
+
+**Contexto:** ver `API_SUPERVISOR.md` (documento de diseño completo) y, del lado backend, `NUEVA_FUNCIONALIDAD_PERSONAL_Y_PROGRAMACION.md` sección 14.24 (repo Laravel). En resumen: la app gana un segundo rol, "Supervisor" (modelo `Employee` del backend, login separado del Inspector vía `api/personal/login`), para registrar desde el celular comentarios + horas trabajadas por actividad/persona, y subir evidencia foto/video a Cloudflare R2 — repitiendo lo que hasta ahora solo se probaba en la pantalla web "Ver como" del panel admin.
+
+**Archivos nuevos:** `data/remote/personal/PersonalAuthDtos.kt`, `data/remote/personal/PersonalActivityDtos.kt`, `data/remote/personal/PersonalApiService.kt`, `data/repository/PersonalAuthRepository.kt`, `data/repository/PersonalActivityRepository.kt`, `presentation/viewmodel/SupervisorLoginViewModel.kt` (+ Factory), `presentation/viewmodel/SupervisorActivityViewModel.kt` (+ Factory), `presentation/ui/SupervisorHomeScreen.kt`.
+
+**Archivos modificados:** `app/build.gradle.kts` (BASE_URL ahora por `buildType` vía `buildConfigField`, ya no una constante editada a mano — evita el riesgo ya vivido en v1.6.3 de dejarla apuntando al emulador en un commit real), `RetrofitClient.kt`, `AppScreen.kt`, `AppNavigationViewModel.kt`, `LoginScreen.kt` (selector Inspector/Supervisor), `MainActivity.kt` (rama nueva `roleKey == "supervisor"` en los puntos donde ya existía `roleKey != "inspector"`, sin refactorizar esa duplicación ya señalada en `LOGIN_Y_ROLES.md`).
+
+**Validación de esta sesión:** `gradlew assembleDebug` — `BUILD SUCCESSFUL`, sin errores ni warnings. El backend (login, actividades, evidencia a R2) ya estaba probado end-to-end con `curl` real y 20 tests automatizados antes de tocar Android (ver `NUEVA_FUNCIONALIDAD_PERSONAL_Y_PROGRAMACION.md` 14.24). **No probado todavía en emulador/dispositivo real** — ver `API_SUPERVISOR.md` sección 6/7 para el detalle de qué queda pendiente.
+
+---
+
+### v1.7.8 — Fix valores de medición "heredados" del activo anterior en Mediciones de Espesor
+
+**Fecha:** 2026-08-27
+
+**Archivos modificados:** `MeasurementThicknessScreen.kt`, `MeasurementThicknessViewModel.kt`
+
+**Contexto:** el equipo de planta reportó que, al terminar de diligenciar un activo en el módulo de Mediciones y pasar al siguiente, un activo **nuevo** (sin ningún borrador previo, ni local ni remoto) aparecía con los valores de espesor/dureza del activo anterior en vez de en blanco. Esto obligaba a borrar manualmente los campos antes de poder registrar el nuevo activo, retrasando la revisión en campo. Se reportó puntualmente en el área de Apilado de Aditivos.
+
+**Investigación:** se revisó toda la cadena de datos antes de tocar código, para descartar que fuera un problema de sincronización o de catálogo desactualizado (como el caso de v1.7.7):
+- `MeasurementThicknessRepository` y `MeasurementThicknessDao` filtran y aíslan correctamente por `elementId` en cada consulta (`WHERE elementId = :elementId`), y el borrador tiene `elementId` como `@PrimaryKey`. Un activo nuevo sin borrador efectivamente llega en blanco (`newEmptyLine()`, todos los campos `null`) una vez que termina de cargar.
+- **Conclusión inicial (parcial):** no era un bug del backend ni de Room — el dato final correcto (en blanco) sí llegaba. No era exclusivo de ninguna área en particular.
+
+**Causa raíz — dos causas combinadas, no una sola:**
+1. **UI (Compose), en `NumberField`:** el `forEach` que dibuja las cubiertas no asignaba una `key` de Compose ni por cubierta ni por activo. Compose identifica cada composable por su posición en el árbol, no por el activo al que pertenecen sus datos — así que al cambiar de activo, el campo de texto de "Cubierta 1 → Izq." seguía siendo *el mismo* composable físico que en el activo anterior, y su `rememberSaveable var text` no se reiniciaba. Arrastrado desde v1.7.1 (cambio deliberado de `remember(value)` a `rememberSaveable` sin key para otro bug, nunca probado con la secuencia de cambiar de activo).
+2. **ViewModel, en `MeasurementThicknessViewModel.selectElement()` — la causa determinante:** a diferencia de `selectArea()` y `selectElementType()` (que sí limpian `draft = null, lines = emptyList()` de inmediato al iniciar la selección), `selectElement()` actualizaba `selectedElementId` de forma síncrona pero dejaba `lines`/`draft` intactos hasta que terminara la llamada de red (`refreshThicknessState()`). Esto generaba un fotograma intermedio real, no solo teórico, donde el `elementId` ya era el del activo nuevo pero `lines` todavía tenía los valores del activo anterior. Verificado en vivo: aplicar *solo* el fix de `key()` (causa 1) no bastó — al probar en el emulador, cambiar de activo seguía mostrando los valores del anterior, porque ese fotograma intermedio alcanzaba a "sembrar" el valor viejo en el composable recién creado antes de que llegaran los datos reales en blanco.
+
+**Fix aplicado (ambas partes, la combinación fue necesaria):**
+- `MeasurementThicknessScreen.kt`: cada `ThicknessLineCard` se envuelve en `key(elementId, line.coverNumber)` dentro de `ThicknessLinesSection`, para que Compose trate cada combinación activo+cubierta como una identidad distinta.
+- `MeasurementThicknessViewModel.kt`: `selectElement()` ahora limpia `draft = null, lines = emptyList()` en la misma actualización síncrona donde fija `selectedElementId`, igual que ya hacían `selectArea()`/`selectElementType()`. Así el primer fotograma renderizado para el activo nuevo ya no tiene datos del activo anterior que filtrar.
+
+**Alcance del cambio — por qué no afecta el trabajo offline:** ambos archivos tocados son de presentación/orquestación de estado en el cliente. No se modificó `MeasurementThicknessRepository`, `MeasurementThicknessDao` ni ningún endpoint de `MeasurementApiService` — el patrón local-first (Room primero, sincronización en segundo plano) y el guardado de borradores `PENDING_SYNC` sin conexión siguen funcionando exactamente igual. Verificado explícitamente en el emulador con WiFi y datos móviles deshabilitados (ver Verificación).
+
+**Verificación (2026-08-27), en emulador real (Android 15, AVD `Medium_Phone_API_35`), sesión y catálogo reales del cliente CORONA:**
+- `gradlew compileDebugKotlin --rerun-tasks` y `assembleDebug` — `BUILD SUCCESSFUL`, sin errores nuevos.
+- **Con red (WiFi):** en el área Apilado de Aditivos, se cargó `K11BT02`/`K11BT03` (activos con borrador remoto real) y se confirmó que cada uno muestra sus propios valores de Cubierta 1 (no los de otro). Se detectó en este paso que el fix de `key()` por sí solo *no* resolvía el problema (`K11BT01` heredaba los valores exactos de `K11BT03`), lo que llevó a encontrar la causa raíz real en el ViewModel (arriba).
+- **Después del fix del ViewModel, con red:** `K11BT01` cargó sus propios valores reales (6.75/6.4/6.8...), distintos a los de `K11BT02`/`K11BT03` — confirma que el fotograma intermedio ya no contamina el estado.
+- **Sin red (`adb shell svc wifi disable` + `svc data disable`), reproduciendo el escenario exacto reportado:** con `K11BT01` cargado (con sus valores reales visibles), se cambió a `K21BT01` — un activo del mismo área nunca antes visitado, sin borrador local ni remoto. Los nueve campos de Cubierta 1 (superior, inferior, dureza) aparecieron completamente en blanco, sin rastro de los valores de `K11BT01`, junto con el mensaje correcto "Sin conexión. Puedes crear un borrador local para este activo." No se guardó ningún borrador durante la prueba.
+
+---
 
 ### v1.7.7 — Fix Condición offline + auditoría de completitud de catálogo + simplificación de íconos de Área
 

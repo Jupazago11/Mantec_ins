@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -23,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -131,6 +133,18 @@ fun LoginScreen(
                         modifier = Modifier.fillMaxWidth(),
                         placeholder = { Text("Usuario", color = TextSecondary) },
                         singleLine = true,
+                        // Sin esto, el teclado autocapitaliza la primera
+                        // letra de un campo vacio (comportamiento por
+                        // defecto de la mayoria de teclados Android) — el
+                        // username es case-sensitive contra el backend, asi
+                        // que "juan.zapata" se enviaba como "Juan.zapata" y
+                        // el login fallaba con credenciales "incorrectas"
+                        // aunque el usuario las haya escrito bien
+                        // (verificado 2026-09-21 contra produccion).
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.None,
+                            autoCorrect = false
+                        ),
                         shape = RoundedCornerShape(18.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = MantecOrange,

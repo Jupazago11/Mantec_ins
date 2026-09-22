@@ -15,9 +15,12 @@ object DatabaseProvider {
                 context.applicationContext,
                 AppDatabase::class.java,
                 "mantec_inspector_db"
-            )
+            ).addMigrations(MIGRATION_19_20, MIGRATION_20_21)
 
             if (BuildConfig.DEBUG) {
+                // Red de seguridad solo en debug para cualquier salto de
+                // version sin migracion explicita todavia — nunca en
+                // release (ver PATRONES_ASINCRONISMO_OFFLINE.md patron 5).
                 builder.fallbackToDestructiveMigration()
             }
 

@@ -1,10 +1,16 @@
 package com.example.mantec_ins.data.remote
 
+import com.example.mantec_ins.data.remote.personal.PersonalEmployeeDto
+
+// Login unico (ver LOGIN_Y_ROLES.md): api/login devuelve "user" si las
+// credenciales matchearon un User (Inspector/Admin) o "employee" si
+// matchearon un Employee (Supervisor) — nunca ambos a la vez.
 data class LoginResponse(
     val success: Boolean,
     val message: String,
     val token: String?,
-    val user: LoginUserDto?
+    val user: LoginUserDto?,
+    val employee: PersonalEmployeeDto? = null
 )
 
 data class LoginUserDto(
